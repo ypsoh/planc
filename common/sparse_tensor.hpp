@@ -41,22 +41,15 @@ class SparseTensor {
       this->m_numel = 0;
     }
 
-    SparseTensor(std::string filename) {
+    SparseTensor(std::string filename): m_numel(0) {
       std::cout << "Reading tensor from " << filename << std::endl;
 
       std::ifstream ifs(filename, std::ios_base::in);
       std::string line;
 
-      int nnz = 0;
       int nmodes = 0;
       int* dims = NULL;
       std::string element;
-
-      // Read first line to get the number of modes
-      // while (std::getline(ifs, line, '\n')) {
-      //   while()
-      //   nmodes++;
-      // }
 
       ifs.seekg(0); // go back to beginning of file to read non zeros
 
@@ -72,7 +65,6 @@ class SparseTensor {
           }
           nmodes--; // since the last element is the value not coordinate
           this->m_modes = nmodes;
-          std::cout << "number of dimensions: " << nmodes << std::endl;
 
           // set the coodrinate vectors
           for (int i = 0; i < nmodes; ++i) {
@@ -93,9 +85,8 @@ class SparseTensor {
           }
           index++;
         }
-        nnz++;
+        this->m_numel++;
       }
-      std::cout << "number of non zeros: " << nnz << std::endl;
     }
 
     ~SparseTensor() {}
@@ -129,9 +120,48 @@ class SparseTensor {
     // Will implement once basic Sparse TF is done
     void restore_index_mapping() {}
     int modes() const { return m_modes; }
+    UWORD numel() const { return m_numel; }
     UVEC dimensions() const { return m_dimensions; }
     int dimensions(int m) const { return m_dimensions[m]; }
+    /**
+     * @brief Computes error between input tensor and b
+     * However, we need to decide how to compute in case of
+     * dealing with sparse tensors (or tensors)
+     *
+     * @param[in] b an input tensor
+     * @return double the squared error in respect to input tensor
+     */
+    double err(const Tensor &b) const {
+      double norm_fro = 0;
+      double err_diff;
+      for (int i = 0; i < this->m_numel; ++i) {
+        err_diff = this->m_data[i] - b.m_data[i];
+        norm_fro += err_diff * err_diff;
+      }
+      return norm_fro;
+    }
+    double norm() const {
+      double norm_fro = 0;
+      for (int i = 0; i < this->m_numel; ++i) {
+        norm_fro += (this->m_data[i] * this->m_data[i]);
+      }
+      return norm_fro;
+    }
+    void print() const {
+      INFO << "Dimensions: ";
+      for (int m = 0; m < this->m_modes; ++m) {
+        INFO << " " << this->m_dimensions[m];
+      }
+      INFO << std::endl;
 
+      INFO << "Number of non-zeros: " << this->m_numel << std::endl;;
+      INFO << "Sparsity: " << (double)this->m_numel / arma::prod(this->m_dimensions) << std::endl;;
+    }
+    void mttkrp(const int i_n, const MAT &i_krp, MAT *o_mttkrp) const {
+      (*o_mttkrp).zeros();
+      // Do awesome mttkrp...
+
+    }
 };
 }
 

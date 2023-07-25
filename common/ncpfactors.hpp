@@ -5,6 +5,7 @@
 
 #include <cassert>
 #include "common/tensor.hpp"
+#include "common/sparse_tensor.hpp"
 #include "common/utils.h"
 #ifdef MPI_DISTNTF
 #include <mpi.h>
@@ -54,6 +55,7 @@ class NCPFactors {
         //                                   arma::distr_param(0, numel));
         ncp_factors[i] = arma::randu<MAT>(rsize, this->m_k);
       }
+      INFO << "Initialized factor matrix for mode: " << i << " ("  << ncp_factors[i].n_rows << "x" << ncp_factors[i].n_cols << ")" << std::endl;
     }
     m_lambda = arma::ones<VEC>(this->m_k);
     freed_ncp_factors = false;

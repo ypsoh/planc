@@ -17,6 +17,7 @@
 #include "common/ncpfactors.hpp"
 #include "common/ntf_utils.hpp"
 #include "common/tensor.hpp"
+#include "common/sparse_tensor.hpp"
 #include "dimtree/ddt.hpp"
 
 namespace planc {
@@ -37,6 +38,7 @@ namespace planc {
 //                              const double *b, const int ldb,
 //                              const double beta, double *c,
 //                              const int ldc);
+template <class T>
 class AUNTF {
  protected:
   planc::NCPFactors m_ncp_factors;
@@ -45,7 +47,7 @@ class AUNTF {
   virtual MAT update(const int mode) = 0;
 
  private:
-  const planc::Tensor &m_input_tensor;
+  const T &m_input_tensor;
   int m_num_it;
   int m_current_it;
   bool m_compute_error;
@@ -80,22 +82,31 @@ class AUNTF {
   virtual void accelerate() {}
 
  public:
-  AUNTF(const planc::Tensor &i_tensor, const int i_k, algotype i_algo)
+  AUNTF(const T &i_tensor, const int i_k, algotype i_algo)
       : m_ncp_factors(i_tensor.dimensions(), i_k, false),
         m_input_tensor(i_tensor),
         m_low_rank_k(i_k),
         m_updalgo(i_algo) {
     m_ncp_factors.normalize();
+    INFO << "Normalizing ncp_factors..." << std::endl;
     gram_without_one.zeros(i_k, i_k);
-    ncp_mttkrp_t = new MAT[i_tensor.modes()];
+    INFO << "modes:" << i_tensor.modes() << std::endl;
+
+    ncp_mttkrp_t = new MAT[i_tensor.modes()]; // basically mttkrp buffer
     ncp_krp = new MAT[i_tensor.modes()];
+    
     for (int i = 0; i < i_tensor.modes(); i++) {
       UWORD current_size = TENSOR_NUMEL / TENSOR_DIM[i];
+
       ncp_krp[i].zeros(current_size, i_k);
       ncp_mttkrp_t[i].zeros(i_k, TENSOR_DIM[i]);
+      
       this->m_stale_mttkrp.push_back(true);
     }
-    lowranktensor = new planc::Tensor(i_tensor.dimensions());
+
+    // YONGSEOK -- Explicitly creating lowrank tensor for very large tensors
+    // is often impractical... we defer this to later stages of implementation
+    // lowranktensor = new planc::Tensor(i_tensor.dimensions());
     m_compute_error = false;
     m_num_it = 20;
     m_normA = i_tensor.norm();
@@ -113,7 +124,7 @@ class AUNTF {
     if (this->m_enable_dim_tree) {
       delete kdt;
     }
-    delete lowranktensor;
+    // delete lowranktensor;
   }
   NCPFactors &ncp_factors() { return m_ncp_factors; }
   void dim_tree(bool i_dim_tree) {

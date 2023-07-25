@@ -14,47 +14,41 @@
 namespace planc {
 
 class SparseNTFDriver {
-    public:
-        template <class NTFType>
-        void callNTF(planc::ParseCommandLine pc) {
-            std::string filename = pc.input_file_name();
+  public:
+    // template <class NTFType>
+    template <template<class T> class NTFType, class T>
+    void callNTF(planc::ParseCommandLine pc) {
+      std::string filename = pc.input_file_name();
+      if (filename.empty()) {
+        std::cout << "Input filename required for SparseNTF operations..." << std::endl;
+        exit(1);
+      }
 
-            if (filename.empty()) {
-                std::cout << "Input filename required for SparseNTF operations..." << std::endl;
-                exit(1);
-            }
-            SparseTensor my_tensor(filename);
-            my_tensor.map_to_compact_indices();
-            for (int m = 0; m < my_tensor.modes(); ++m) {
-                std::cout << "number of dims for mode: " << m << " is: " << my_tensor.dimensions(m) << std::endl;
-            }
+      T my_tensor(filename);
+      my_tensor.map_to_compact_indices(); // required operation to obtain dimensions
+      my_tensor.print();
 
-            // int test_modes = pc.num_modes();
-            // UVEC dimensions(test_modes);
-
-            // Load tensor
-            // get the number of modes e.g. 4
-            // gets the dimensions e.g. 23 423 234
-            // get the SparseTensor
-
-            std::cout << "Input filename = " << filename << std::endl;
-
-
-        }
+      NTFType<T> ntfsolver(my_tensor, pc.lowrankk(), pc.lucalgo());
+      // Setting flags. does it need to be here?
+      ntfsolver.num_it(pc.iterations());
+      ntfsolver.compute_error(pc.compute_error());
+      // ntfsolver.computeNTF();
+    }
+    SparseNTFDriver() {}
 };
 }
 
 int main(int argc, char* argv[]) {
-    planc::ParseCommandLine pc(argc, argv);
-    pc.parseplancopts();
-    planc::SparseNTFDriver sntfd;
-    switch (pc.lucalgo())
-    {
-    case MU:
-        sntfd.callNTF<planc::NTFMU>(pc);
-        break;
-    
-    default:
-        ERR << "Wrong algorithm choice. Quitting.." << pc.lucalgo() << std::endl;
-    }
+  planc::ParseCommandLine pc(argc, argv);
+  pc.parseplancopts();
+  planc::SparseNTFDriver sntfd;
+  switch (pc.lucalgo())
+  {
+  case MU:
+    sntfd.callNTF<planc::NTFMU, planc::SparseTensor>(pc);
+    break;
+
+  default:
+    ERR << "Wrong algorithm choice. Quitting.." << pc.lucalgo() << std::endl;
+  }
 }
