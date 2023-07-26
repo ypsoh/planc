@@ -309,6 +309,7 @@ current_nrows *= rightkrp.n_rows;
       std::cout << this->ncp_factors[i];
     }
   }
+  MAT * factors() { return ncp_factors; }
   /**
    * print the ith factor matrix alone
    * @param[in] i_n the mode for which the factor matrix to be printed

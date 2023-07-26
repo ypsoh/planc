@@ -25,14 +25,13 @@ class SparseNTFDriver {
       }
 
       T my_tensor(filename);
-      my_tensor.map_to_compact_indices(); // required operation to obtain dimensions
       my_tensor.print();
 
       NTFType<T> ntfsolver(my_tensor, pc.lowrankk(), pc.lucalgo());
       // Setting flags. does it need to be here?
       ntfsolver.num_it(pc.iterations());
       ntfsolver.compute_error(pc.compute_error());
-      // ntfsolver.computeNTF();
+      ntfsolver.computeSparseNTF();
     }
     SparseNTFDriver() {}
 };

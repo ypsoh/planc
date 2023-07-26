@@ -36,6 +36,12 @@ class SparseTensor {
     std::vector<std::vector<int>> m_compact_indices;
     std::vector<std::unordered_map<int, int>> m_mappings;
 
+    // Threadlocks that are used for sparse mttkrp
+    // instantiated once the longest mode is identified
+    // this is so that we can 'fine-grain' control when a output row of mttkrp
+    // is being updated without contention
+    mutable std::vector<omp_lock_t> m_locks;
+
     SparseTensor() {
       this->m_modes = 0;
       this->m_numel = 0;
@@ -54,11 +60,8 @@ class SparseTensor {
       ifs.seekg(0); // go back to beginning of file to read non zeros
 
       while (std::getline(ifs, line, '\n')) {
-        // std::cout << line << ""
         // for every line
-
         std::stringstream _line(line);
-
         if (nmodes == 0) {
           while(_line >> element) {
             nmodes++;
@@ -87,10 +90,18 @@ class SparseTensor {
         }
         this->m_numel++;
       }
+      // Map the 'raw' indices of the non zeros to a
+      // corresponding row in a factor matrix starting from 0
+      map_to_compact_indices();
+
+      // instantiate the omp_lock_ts
+      m_locks.resize(longest_mode());
+      for (auto lock : m_locks) {
+        omp_init_lock(&lock);
+      }
     }
 
     ~SparseTensor() {}
-
     /*
     Used to map original indices to compact indices
     (e.g. (34, 32, 53, 32) --> (0, 1, 2, 1))
@@ -117,12 +128,16 @@ class SparseTensor {
         this->m_dimensions[m] = this->m_mappings[m].size();
       }
     }
-    // Will implement once basic Sparse TF is done
+    // TODO: Will implement once basic Sparse TF is done
+    // or maybe just yield the mappings info as separate output for
+    // actually interpreting the factor matrices
     void restore_index_mapping() {}
     int modes() const { return m_modes; }
     UWORD numel() const { return m_numel; }
     UVEC dimensions() const { return m_dimensions; }
     int dimensions(int m) const { return m_dimensions[m]; }
+    int longest_mode() const { return arma::max(m_dimensions); }
+
     /**
      * @brief Computes error between input tensor and b
      * However, we need to decide how to compute in case of
@@ -157,10 +172,47 @@ class SparseTensor {
       INFO << "Number of non-zeros: " << this->m_numel << std::endl;;
       INFO << "Sparsity: " << (double)this->m_numel / arma::prod(this->m_dimensions) << std::endl;;
     }
-    void mttkrp(const int i_n, const MAT &i_krp, MAT *o_mttkrp) const {
-      (*o_mttkrp).zeros();
-      // Do awesome mttkrp...
 
+    void mttkrp(const int i_n, MAT *i_factors, MAT *o_mttkrp) const {
+      (*o_mttkrp).zeros();
+      INFO << "Size of output matrix (for mttkrp results)" <<
+      o_mttkrp->n_rows << "x" << o_mttkrp->n_cols << std::endl;
+
+      unsigned int rank = i_factors[i_n].n_cols;
+      int max_threads = omp_get_max_threads();
+
+      // Do awesome mttkrp...
+      double rows[max_threads][rank];
+
+      #pragma omp parallel
+      {
+        int tid = omp_get_thread_num();
+        double * row = rows[tid];
+
+        #pragma omp for schedule(static)
+        for (int i = 0; i < m_numel; ++i) {
+          for(int r = 0; r < rank; ++r) {
+            row[r] = this->m_data[i]; // init temp accumulator
+          }
+          // calculate mttkrp for current non-zero
+          for (int m = 0; m < m_modes; ++m) {
+            if (m != i_n) {
+              unsigned int row_id = m_compact_indices[m][i];
+              for (int r = 0; r < rank; ++r) {
+                row[r] *= i_factors[m](row_id, r);
+              }
+            }
+          }
+
+          // update destination row
+          unsigned int dest_row_id = m_compact_indices[i_n][i];
+          omp_set_lock(&(m_locks[dest_row_id]));
+          for (int r = 0; r < rank; ++r) {
+            o_mttkrp->at(r, dest_row_id) += row[r];
+          }
+          omp_unset_lock(&(m_locks[dest_row_id]));
+        } // for each non-zero
+      } // #pragma omp parallel
     }
 };
 }
