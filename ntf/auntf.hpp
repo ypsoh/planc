@@ -103,9 +103,6 @@ class AUNTF {
       this->m_stale_mttkrp.push_back(true);
     }
 
-    // YONGSEOK -- Explicitly creating lowrank tensor for very large tensors
-    // is often impractical... we defer this to later stages of implementation
-    // lowranktensor = new planc::Tensor(i_tensor.dimensions());
     m_compute_error = false;
     m_num_it = 20;
     m_normA = i_tensor.norm();
@@ -239,6 +236,8 @@ class AUNTF {
     // MAT krpleavingzero.zeros(krpsize, this->m_k);
     // krp_leave_out_one(0, &krpleavingzero);
     // MAT lowranktensor(this->m_dimensions[0], krpsize);
+    lowranktensor = new planc::Tensor(m_input_tensor.dimensions());
+
     // lowranktensor = this->ncp_factors[0] * trans(krpleavingzero);
 
     // compute current low rank tensor as above.
