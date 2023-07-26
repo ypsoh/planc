@@ -5,7 +5,6 @@
 
 #include <cassert>
 #include "common/tensor.hpp"
-#include "common/sparse_tensor.hpp"
 #include "common/utils.h"
 #ifdef MPI_DISTNTF
 #include <mpi.h>
@@ -98,6 +97,7 @@ ncp_factors[i].clear();
   int rank() const { return m_k; }
   /// dimensions of every mode
   UVEC dimensions() const { return m_dimensions; }
+  int dimension(int mode) const { return m_dimensions[mode]; }
   /// factor matrix of a mode i_n
   MAT &factor(const int i_n) const { return ncp_factors[i_n]; }
   /// returns number of modes

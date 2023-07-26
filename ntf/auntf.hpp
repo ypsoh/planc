@@ -66,18 +66,18 @@ class AUNTF {
 
   // Ensure factor is unnormalised when calling this function
   void update_factor_mode(const int &current_mode, const MAT &factor) {
-  m_ncp_factors.set(current_mode, factor);
-  m_ncp_factors.normalize(current_mode);
+    m_ncp_factors.set(current_mode, factor);
+    m_ncp_factors.normalize(current_mode);
 
-  if (m_enable_dim_tree) {
-    MAT temp = m_ncp_factors.factor(current_mode).t();
-    kdt->set_factor(temp.memptr(), current_mode);
-  }
+    if (m_enable_dim_tree) {
+      MAT temp = m_ncp_factors.factor(current_mode).t();
+      kdt->set_factor(temp.memptr(), current_mode);
+    }
 
-  int num_modes = this->m_input_tensor.modes();
-  for (int mode = 0; mode < num_modes; mode++) {
-    if (mode != current_mode) this->m_stale_mttkrp[current_mode] = true;
-  }
+    int num_modes = this->m_input_tensor.modes();
+    for (int mode = 0; mode < num_modes; mode++) {
+      if (mode != current_mode) this->m_stale_mttkrp[current_mode] = true;
+    }
   }
   virtual void accelerate() {}
 
@@ -148,12 +148,21 @@ class AUNTF {
         // INFO << "gram_without_" << j << "::" << arma::cond(gram_without_one)
         //     << std::endl
         //     << gram_without_one << std::endl;
-        // Do mttkrp here right?
         m_input_tensor.mttkrp(j, m_ncp_factors.factors(), &ncp_mttkrp_t[j]);
         MAT factor = update(j);
-        INFO << "iter::" << m_current_it << "::factor:: " << j << std::endl;
         update_factor_mode(j, factor.t());
       } // for all modes
+
+      if (m_compute_error) {
+        // compute mttkrp for last mode
+        int last_mode = this->m_input_tensor.modes() - 1;
+        m_input_tensor.mttkrp(last_mode, m_ncp_factors.factors(), &ncp_mttkrp_t[last_mode]);
+
+        double temp_err = m_input_tensor.err(m_ncp_factors, ncp_mttkrp_t[last_mode], last_mode);
+        this->m_rel_error = temp_err;
+        INFO << "relative_error @it " << this->m_current_it
+            << "=" << temp_err << std::endl;
+      }
     }
   }
 
@@ -161,44 +170,44 @@ class AUNTF {
     for (m_current_it = 0; m_current_it < m_num_it; m_current_it++) {
       INFO << "iter::" << this->m_current_it << std::endl;
       for (int j = 0; j < this->m_input_tensor.modes(); j++) {
-      m_ncp_factors.gram_leave_out_one(j, &gram_without_one);
-  #ifdef NTF_VERBOSE
-      INFO << "gram_without_" << j << "::" << arma::cond(gram_without_one)
-          << std::endl
-          << gram_without_one << std::endl;
-  #endif
-      if (this->m_stale_mttkrp[j]) {
-        m_ncp_factors.krp_leave_out_one(j, &ncp_krp[j]);
-  #ifdef NTF_VERBOSE
-        INFO << "krp_leave_out_" << j << std::endl << ncp_krp[j] << std::endl;
-  #endif
-        if (this->m_enable_dim_tree) {
-        double multittv_time = 0;
-        double mttkrp_time = 0;
-        kdt->in_order_reuse_MTTKRP(j, ncp_mttkrp_t[j].memptr(), false,
-          multittv_time, mttkrp_time);
-        } else {
-        m_input_tensor.mttkrp(j, ncp_krp[j], &ncp_mttkrp_t[j]);
+        m_ncp_factors.gram_leave_out_one(j, &gram_without_one);
+    #ifdef NTF_VERBOSE
+        INFO << "gram_without_" << j << "::" << arma::cond(gram_without_one)
+            << std::endl
+            << gram_without_one << std::endl;
+    #endif
+        if (this->m_stale_mttkrp[j]) {
+          m_ncp_factors.krp_leave_out_one(j, &ncp_krp[j]);
+    #ifdef NTF_VERBOSE
+          INFO << "krp_leave_out_" << j << std::endl << ncp_krp[j] << std::endl;
+    #endif
+          if (this->m_enable_dim_tree) {
+          double multittv_time = 0;
+          double mttkrp_time = 0;
+          kdt->in_order_reuse_MTTKRP(j, ncp_mttkrp_t[j].memptr(), false,
+            multittv_time, mttkrp_time);
+          } else {
+          m_input_tensor.mttkrp(j, ncp_krp[j], &ncp_mttkrp_t[j]);
+          }
+          this->m_stale_mttkrp[j] = false;
+    #ifdef NTF_VERBOSE
+          INFO << "mttkrp for factor" << j << std::endl
+              << ncp_mttkrp_t[j] << std::endl;
+    #endif
         }
-        this->m_stale_mttkrp[j] = false;
-  #ifdef NTF_VERBOSE
-        INFO << "mttkrp for factor" << j << std::endl
-            << ncp_mttkrp_t[j] << std::endl;
-  #endif
-      }
-      // MAT factor = update(m_updalgo, gram_without_one, ncp_mttkrp_t[j], j);
-      MAT factor = update(j);
-  #ifdef NTF_VERBOSE
-      INFO << "iter::" << i << "::factor:: " << j << std::endl
-          << factor << std::endl;
-  #endif
-      update_factor_mode(j, factor.t());
+        // MAT factor = update(m_updalgo, gram_without_one, ncp_mttkrp_t[j], j);
+        MAT factor = update(j);
+    #ifdef NTF_VERBOSE
+        INFO << "iter::" << i << "::factor:: " << j << std::endl
+            << factor << std::endl;
+    #endif
+        update_factor_mode(j, factor.t());
       }
       if (m_compute_error) {
-      double temp_err = computeObjectiveError();
-      this->m_rel_error = temp_err;
-      INFO << "relative_error at it::" << this->m_current_it
-          << "::" << temp_err << std::endl;
+        double temp_err = computeObjectiveError();
+        this->m_rel_error = temp_err;
+        INFO << "relative_error at it::" << this->m_current_it
+            << "::" << temp_err << std::endl;
       }
       if (this->m_accelerated) accelerate();
   #ifdef NTF_VERBOSE
@@ -208,27 +217,28 @@ class AUNTF {
     }
   }
   void accelerated(const bool &set_acceleration) {
-  this->m_accelerated = set_acceleration;
-  this->m_compute_error = true;
+    this->m_accelerated = set_acceleration;
+    this->m_compute_error = true;
   }
   bool is_stale_mttkrp(const int &current_mode) const {
-  return this->m_stale_mttkrp[current_mode];
+    return this->m_stale_mttkrp[current_mode];
   }
   void compute_error(bool i_error) { this->m_compute_error = i_error; }
   void reset(const NCPFactors &new_factors, bool trans = false) {
-  int m_modes = this->m_input_tensor.modes();
-  if (!trans) {
-    for (int i = 0; i < m_modes; i++) {
-    update_factor_mode(i, new_factors.factor(i));
+    int m_modes = this->m_input_tensor.modes();
+    if (!trans) {
+      for (int i = 0; i < m_modes; i++) {
+      update_factor_mode(i, new_factors.factor(i));
+      }
+    } else {
+      for (int i = 0; i < m_modes; i++) {
+      update_factor_mode(i, new_factors.factor(i).t());
+      }
     }
-  } else {
-    for (int i = 0; i < m_modes; i++) {
-    update_factor_mode(i, new_factors.factor(i).t());
-    }
-  }
-  m_ncp_factors.set_lambda(new_factors.lambda());
+    m_ncp_factors.set_lambda(new_factors.lambda());
   }
   int current_it() const { return m_current_it; }
+
   double computeObjectiveError() {
     // current low rank tensor
     // UWORD krpsize = arma::prod(this->m_dimensions);

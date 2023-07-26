@@ -17,7 +17,9 @@
 #include <utility>
 #include <vector>
 #include <unordered_map>
+#include <cmath>
 #include "common/utils.h"
+#include "common/ncpfactors.hpp"
 
 namespace planc {
 
@@ -139,22 +141,66 @@ class SparseTensor {
     int longest_mode() const { return arma::max(m_dimensions); }
 
     /**
-     * @brief Computes error between input tensor and b
-     * However, we need to decide how to compute in case of
-     * dealing with sparse tensors (or tensors)
-     *
-     * @param[in] b an input tensor
+     * @brief Computes rel. error between input tensor X and kruskal model M
+     * || X - M ||^2 / || X ||^2
+     * @param[in] factors NCPFactors - factor matrices
      * @return double the squared error in respect to input tensor
      */
-    double err(const Tensor &b) const {
-      double norm_fro = 0;
-      double err_diff;
-      for (int i = 0; i < this->m_numel; ++i) {
-        err_diff = this->m_data[i] - b.m_data[i];
-        norm_fro += err_diff * err_diff;
+    double err(planc::NCPFactors &factors, const MAT &i_mttkrp_mat, const int mode) const {
+      double inner_prod = 0;
+      unsigned int rank = factors.rank();
+      double accum[rank] = {}; // init to zero
+
+      int last_mode_dim = factors.dimension(mode);
+
+      #pragma omp parallel for schedule(static)
+      for (int j = 0; j < rank; ++j) {
+        for (int i = 0; i < last_mode_dim; ++i) {
+          accum[j] += factors.factor(mode)(i, j) * i_mttkrp_mat(j, i);
+        }
       }
-      return norm_fro;
+      for (int i = 0; i < rank; ++i) {
+        inner_prod += accum[i] * factors.lambda()[i];
+      }
+
+      double norm_x = 0;
+      // Compute norm(X)^2
+      #pragma omp parallel for reduction(+:norm_x) schedule(static)
+      for(int i = 0; i < m_numel; i++) {
+        norm_x += m_data[i] * m_data[i];
+      }
+
+      // Compute norm of factor matrices
+      // create gram matrix
+      MAT tmp_gram(rank, rank);
+
+      // compute the hadamard of the factor grams
+      factors.gram(&tmp_gram);
+
+      #pragma omp parallel for schedule(dynamic)
+      for (int i = 0; i < rank; ++i) {
+        for (int j = 0; j < i+1; ++j) {
+          tmp_gram(i, j) *= factors.lambda()[i] * factors.lambda()[j];
+        }
+      }
+
+      double norm_u = 0;
+      for (int i = 0; i < rank; ++i) {
+        for (int j = 0; j < i; ++j) {
+          norm_u += tmp_gram(i, j) * 2;
+        }
+        norm_u += tmp_gram(i, i);
+      }
+      norm_u = std::abs(norm_u);
+
+      double norm_residual = norm_x + norm_u - 2 * inner_prod;
+      // if (norm_residual > 0.0) {
+      norm_residual = std::sqrt(norm_residual);
+      // }
+      double rel_fit_err = (norm_residual/std::sqrt(norm_x));
+      return rel_fit_err;
     }
+
     double norm() const {
       double norm_fro = 0;
       for (int i = 0; i < this->m_numel; ++i) {
@@ -175,8 +221,6 @@ class SparseTensor {
 
     void mttkrp(const int i_n, MAT *i_factors, MAT *o_mttkrp) const {
       (*o_mttkrp).zeros();
-      INFO << "Size of output matrix (for mttkrp results)" <<
-      o_mttkrp->n_rows << "x" << o_mttkrp->n_cols << std::endl;
 
       unsigned int rank = i_factors[i_n].n_cols;
       int max_threads = omp_get_max_threads();
