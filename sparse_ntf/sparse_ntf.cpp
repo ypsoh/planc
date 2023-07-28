@@ -58,7 +58,8 @@ int main(int argc, char* argv[]) {
       sntfd.callNTF<planc::NTFMU, planc::ALTOTensor<LIType>>(pc);
       break;
     case HALS:
-      sntfd.callNTF<planc::NTFHALS, planc::SparseTensor>(pc);
+      // sntfd.callNTF<planc::NTFHALS, planc::SparseTensor>(pc);
+      sntfd.callNTF<planc::NTFMU, planc::SparseTensor>(pc);
       break;
     case ANLSBPP:
       sntfd.callNTF<planc::NTFANLSBPP, planc::SparseTensor>(pc);

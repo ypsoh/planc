@@ -22,6 +22,7 @@
 #include "common/bitops.hpp"
 
 #define MAX_NUM_MODES 5
+#define MIN_FIBER_REUSE 4
 
 typedef enum PackOrder_ { LSB_FIRST, MSB_FIRST } PackOrder;
 typedef enum ModeOrder_ { SHORT_FIRST, LONG_FIRST, NATURAL } ModeOrder;
@@ -51,8 +52,8 @@ class ALTOTensor : public SparseTensor {
     std::vector<double> m_alto_data;
     std::vector<LIT> m_alto_indices; // linearized
 
-    std::vector<int> partition_ptr;
-    std::vector<Interval> partition_intervals;
+    std::vector<int> m_partition_ptr;
+    std::vector<std::vector<Interval>> m_partition_intervals;
 
     std::vector<LIT> alto_cr_masks;
     LIT *cr_masks = nullptr;
@@ -150,10 +151,14 @@ class ALTOTensor : public SparseTensor {
     // partition
     void partition_workload() {
       int num_partitions = omp_get_max_threads();
-      partition_ptr.resize(num_partitions+1);
-      partition_intervals.resize(num_partitions * m_modes);
+      m_partition_ptr.resize(num_partitions+1);
+      m_partition_intervals.resize(num_partitions);
+      for (int p = 0; p < num_partitions; ++p) {
+        m_partition_intervals[p].resize(m_modes);
+      }
       alto_cr_masks.resize(m_modes);
 
+      // roughly how much nnzs per partition
       int nnz_partition = (m_numel + num_partitions - 1) / num_partitions;
       printf("num_partitions=%d, nnz_partition=%llu\n", num_partitions, nnz_partition);
 
@@ -161,8 +166,9 @@ class ALTOTensor : public SparseTensor {
       for (int n = 0; n < m_modes; ++n) {
         ALTO_MASKS[n] = mode_masks[n];
       }
+
       int alto_bits = popcount(alto_mask);
-      partition_ptr[0] = 0;
+      m_partition_ptr[0] = 0;
 
       #pragma omp parallel for schedule(static,1) proc_bind(close)
       for (int p = 0; p < num_partitions; ++p) {
@@ -175,12 +181,14 @@ class ALTOTensor : public SparseTensor {
         if (start_i > end_i)
             start_i = end_i;
 
-        partition_ptr[p + 1] = end_i;
-        // Find the subspace of a given partition.
+        // partition pointer points to the index where the nnz index ends
+        m_partition_ptr[p + 1] = end_i;
       }// omp parallel
 
-      // O(storage requirements) for conflict resolution, using dense/direct-access storage,
-      // can be computed in constant time from the subspace id. The code below finds tighter bounds
+      // O(storage requirements) for conflict resolution,
+      // using dense/direct-access storage,
+      // can be computed in constant time from the subspace id. 
+      // The code below finds tighter bounds
       // using interval analysis in linear time (where nnz>> nptrn>> m_modes).
       #pragma omp parallel for schedule(static,1) proc_bind(close)
       for (int p = 0; p < num_partitions; ++p) {
@@ -190,18 +198,22 @@ class ALTOTensor : public SparseTensor {
             fib[n].stop = 0;
           }
 
-          for (int i = partition_ptr[p]; i < partition_ptr[p + 1]; ++i) {
+          // for all elements in the p-th partition
+          for (int i = m_partition_ptr[p]; i < m_partition_ptr[p + 1]; ++i) {
             LIT alto_idx = m_alto_indices[i];
             for (int n = 0; n < m_modes; ++n) {
+              // retrieve original index for mode n
               int mode_idx = pext(alto_idx, ALTO_MASKS[n]);
+              // get the start and stop index for each mode
+              // for each 
               fib[n].start = std::min(fib[n].start, mode_idx);
               fib[n].stop = std::max(fib[n].stop, mode_idx);
             }
           }
 
           for (int n = 0; n < m_modes; ++n) {
-              partition_intervals[p * m_modes + n].start = fib[n].start;
-              partition_intervals[p * m_modes + n].stop = fib[n].stop;
+              m_partition_intervals[p][n].start = fib[n].start;
+              m_partition_intervals[p][n].stop = fib[n].stop;
           }
       }
     }
@@ -289,12 +301,78 @@ class ALTOTensor : public SparseTensor {
       }
       printf("alto_mask = 0x%llx\n", alto_mask);
     } // end setup_packed_alto
-
-    void mttkrp(const int i_n, MAT *i_factors, MAT *o_mttkrp) const {
-      INFO << "override mttkrp function for ALTO format tensors" << std::endl;
-      exit(0);
+    /*
+    void create_direct_access_memory(int target_mode, int rank, std::vector<double> output_fibers) {
+      {
+        double total_storage = 0.0;
+        #pragma omp parallel for reduction(+: total_storage) proc_bind(close)
+        for (int p = 0; p < num_partitions; p++) {
+          int64_t num_fibs = 0;
+          if (target_mode == -1) {
+            // default mode - allocate enough da_mem for all modes with reuse > threshold
+            for (int n = 0; n < m_modes; ++n) {
+              int fib_reuse = m_numel / dimensions(n);
+              if (fib_reuse > MIN_FIBER_REUSE) {
+                Interval const intvl = m_partition_intervals[p][n];
+                int const mode_fibs = intvl.stop - intvl.start + 1;
+                num_fibs = std::max(num_fibs, mode_fibs);
+              }
+            }
+          }
+          if (num_fibs) {
+            _ofibs[p] = (double*)AlignedMalloc(num_fibs * rank * sizeof(double));
+            assert(_ofibs[p]);
+          }
+          else _ofibs[p] = NULL;
+          total_storage += ((double) num_fibs * rank * sizeof(double)) / (1024.0*1024.0);
+        } // for all partitions
+        printf("ofibs storage/prtn: %f MB\n", total_storage/(double)num_partitions);
+      }
     }
-    
+    */
+
+    void mttkrp(const int target_mode, MAT *i_factors, MAT *o_mttkrp) const {
+      (*o_mttkrp).zeros();
+      // INFO << "creating output fibers for direct access during mttkrp" << std::endl;
+      
+      unsigned int rank = i_factors[target_mode].n_cols;
+      // create_direct_access_memory(-1, rank, o_fibs);
+
+      LIT ALTO_MASKS[MAX_NUM_MODES];
+      #pragma omp simd
+      for (int n = 0; n < m_modes; ++n) {
+        ALTO_MASKS[n] = mode_masks[n];
+      }
+
+      double row[rank]; //Allocate an auto array of variable size.
+
+      for (int i = 0; i < m_numel; ++i) {
+        LIT const alto_idx = m_alto_indices[i];
+        double const val = m_alto_data[i];
+
+        #pragma omp simd
+        for (int r = 0; r < rank; ++r) {
+          row[r] = val;
+        }
+
+        for (int m = 0; m < m_modes; ++m) {
+          if (m != target_mode) { //input fibers
+            int const row_id = pext(alto_idx, ALTO_MASKS[m]);
+            #pragma omp simd
+            for (int r = 0; r < rank; ++r) {
+              row[r] *= i_factors[m](row_id, r);
+            }
+          }
+        }
+
+        //Output fibers
+        int row_id = pext(alto_idx, ALTO_MASKS[target_mode]);
+        #pragma omp simd
+        for (int r = 0; r < rank; ++r) {
+          o_mttkrp->at(r, row_id) += row[r];
+        }
+      } // non zeros
+    }
 }; // class ALTOTensor
 } // namespace planc
 
