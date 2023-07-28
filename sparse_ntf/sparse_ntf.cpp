@@ -3,13 +3,24 @@
 #include "common/ncpfactors.hpp"
 #include "common/ntf_utils.hpp"
 #include "common/parsecommandline.hpp"
-// #include "common/tensor.hpp"
 #include "common/sparse_tensor.hpp"
+#include "common/alto_tensor.hpp"
 #include "ntf/ntfanlsbpp.hpp"
 #include "ntf/ntfaoadmm.hpp"
 #include "ntf/ntfhals.hpp"
 #include "ntf/ntfmu.hpp"
 #include "ntf/ntfnes.hpp"
+
+
+#if ALTO_MASK_LENGTH == 64
+  typedef unsigned long long LIType;
+#elif ALTO_MASK_LENGTH == 128
+  typedef unsigned __int128 LIType;
+#else
+  #pragma message("Using default 64-bit.")
+  typedef unsigned long long LIType;
+#endif
+
 
 namespace planc {
 
@@ -44,7 +55,7 @@ int main(int argc, char* argv[]) {
   switch (pc.lucalgo())
   {
     case MU:
-      sntfd.callNTF<planc::NTFMU, planc::SparseTensor>(pc);
+      sntfd.callNTF<planc::NTFMU, planc::ALTOTensor<LIType>>(pc);
       break;
     case HALS:
       sntfd.callNTF<planc::NTFHALS, planc::SparseTensor>(pc);

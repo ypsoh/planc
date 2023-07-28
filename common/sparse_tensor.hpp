@@ -24,7 +24,7 @@
 namespace planc {
 
 class SparseTensor {
-  private:
+  protected:
     UVEC m_dimensions;
     UWORD m_numel;
     unsigned int rand_seed;
@@ -146,7 +146,7 @@ class SparseTensor {
      * @param[in] factors NCPFactors - factor matrices
      * @return double the squared error in respect to input tensor
      */
-    double err(planc::NCPFactors &factors, const MAT &i_mttkrp_mat, const int mode) const {
+    virtual double err(planc::NCPFactors &factors, const MAT &i_mttkrp_mat, const int mode) const {
       double inner_prod = 0;
       unsigned int rank = factors.rank();
       double accum[rank] = {}; // init to zero
@@ -219,7 +219,7 @@ class SparseTensor {
       INFO << "Sparsity: " << (double)this->m_numel / arma::prod(this->m_dimensions) << std::endl;;
     }
 
-    void mttkrp(const int i_n, MAT *i_factors, MAT *o_mttkrp) const {
+    virtual void mttkrp(const int i_n, MAT *i_factors, MAT *o_mttkrp) const {
       (*o_mttkrp).zeros();
 
       unsigned int rank = i_factors[i_n].n_cols;
