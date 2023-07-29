@@ -137,7 +137,7 @@ class SparseTensor {
     int modes() const { return m_modes; }
     UWORD numel() const { return m_numel; }
     UVEC dimensions() const { return m_dimensions; }
-    int dimensions(int m) const { return m_dimensions[m]; }
+    unsigned int dimensions(int m) const { return m_dimensions[m]; }
     int longest_mode() const { return arma::max(m_dimensions); }
 
     /**
