@@ -58,20 +58,19 @@ int main(int argc, char* argv[]) {
       sntfd.callNTF<planc::NTFMU, planc::ALTOTensor<LIType>>(pc);
       break;
     case HALS:
-      // sntfd.callNTF<planc::NTFHALS, planc::SparseTensor>(pc);
-      sntfd.callNTF<planc::NTFMU, planc::SparseTensor>(pc);
+      sntfd.callNTF<planc::NTFHALS, planc::ALTOTensor<LIType>>(pc);
       break;
     case ANLSBPP:
-      sntfd.callNTF<planc::NTFANLSBPP, planc::SparseTensor>(pc);
+      sntfd.callNTF<planc::NTFANLSBPP, planc::ALTOTensor<LIType>>(pc);
       break;
     case AOADMM:
-      sntfd.callNTF<planc::NTFAOADMM, planc::SparseTensor>(pc);
+      sntfd.callNTF<planc::NTFAOADMM, planc::ALTOTensor<LIType>>(pc);
       break;
     // Leave out NESTEROV for now since it requires a bit of refactoring --
     // it computes the objective error using the lowranktensor which
     // we don't explicitly use at all in the Sparse TF case...
     // case NESTEROV:
-    //   sntfd.callNTF<planc::NTFNES, planc::SparseTensor>(pc);
+    //   sntfd.callNTF<planc::NTFNES, planc::ALTOTensor<LIType>>(pc);
     //   break;
     default:
       ERR << "Wrong algorithm choice. Quitting.." << pc.lucalgo() << std::endl;
