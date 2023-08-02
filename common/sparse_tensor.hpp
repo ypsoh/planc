@@ -172,7 +172,7 @@ class SparseTensor {
 
       // Compute norm of factor matrices
       // create gram matrix
-      MAT tmp_gram(rank, rank);
+      MAT tmp_gram = arma::ones<MAT>(rank, rank);
 
       // compute the hadamard of the factor grams
       factors.gram(&tmp_gram);
