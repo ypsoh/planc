@@ -5,6 +5,7 @@
 #include "common/parsecommandline.hpp"
 #include "common/sparse_tensor.hpp"
 #include "common/alto_tensor.hpp"
+#include "common/blco_tensor.hpp"
 #include "ntf/ntfanlsbpp.hpp"
 #include "ntf/ntfaoadmm.hpp"
 #include "ntf/ntfhals.hpp"
@@ -17,8 +18,8 @@
 #elif ALTO_MASK_LENGTH == 128
   typedef unsigned __int128 LIType;
 #else
-  #pragma message("Using default 64-bit.")
-  typedef unsigned long long LIType;
+  #pragma message("Using default 128-bit.")
+  typedef unsigned __int128 LIType;
 #endif
 
 
@@ -55,7 +56,8 @@ int main(int argc, char* argv[]) {
   switch (pc.lucalgo())
   {
     case MU:
-      sntfd.callNTF<planc::NTFMU, planc::ALTOTensor<LIType>>(pc);
+      // sntfd.callNTF<planc::NTFMU, planc::ALTOTensor<LIType>>(pc);
+      sntfd.callNTF<planc::NTFMU, planc::BLCOTensor<LIType>>(pc);
       break;
     case HALS:
       sntfd.callNTF<planc::NTFHALS, planc::ALTOTensor<LIType>>(pc);

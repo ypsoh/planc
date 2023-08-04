@@ -285,6 +285,7 @@ class AUNTF {
     //     INFO << i << ":" << output_tensor[i] << std::endl;
     // }
     double err = m_input_tensor.err(*lowranktensor);
+    INFO << "norm(X-M, 2): " << err << "norm(X, 2)" << this->m_normA << std::endl;
     err = std::sqrt(err / this->m_normA);
     return err;
   }

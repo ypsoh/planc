@@ -197,6 +197,7 @@ class SparseTensor {
       // if (norm_residual > 0.0) {
       norm_residual = std::sqrt(norm_residual);
       // }
+      INFO << "norm_x: " << norm_x << "inner: " << inner_prod << "norm_u: " << norm_u << std::endl;
       double rel_fit_err = (norm_residual/std::sqrt(norm_x));
       return rel_fit_err;
     }
@@ -208,6 +209,7 @@ class SparseTensor {
       }
       return norm_fro;
     }
+    
     void print() const {
       INFO << "Dimensions: ";
       for (int m = 0; m < this->m_modes; ++m) {

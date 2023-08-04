@@ -62,6 +62,7 @@ class ALTOTensor : public SparseTensor {
     std::vector<LIT> alto_cr_masks;
     LIT *cr_masks = nullptr;
 
+    ALTOTensor() {};
     ALTOTensor(std::string filename) : SparseTensor(filename) {
       //uint64_t ticks;
       double wtime_s, wtime;
@@ -96,7 +97,7 @@ class ALTOTensor : public SparseTensor {
         LIT alto = 0;
         m_alto_data[i] = m_data[i];
         for (int j = 0; j < m_modes; j++) {
-            alto |= pdep(static_cast<unsigned long long>(m_compact_indices[j][i]), ALTO_MASKS[j]);
+            alto |= pdep(static_cast<LIT>(m_compact_indices[j][i]), ALTO_MASKS[j]);
         }
         m_alto_indices[i] = alto;
       } // end of linearization
@@ -300,7 +301,9 @@ class ALTOTensor : public SparseTensor {
         alto_mask |= ALTO_MASKS[n];
         printf("ALTO_MASKS[%d] = 0x%llx\n", n, ALTO_MASKS[n]);
       }
-      printf("alto_mask = 0x%llx\n", alto_mask);
+      // printf("alto_mask = 0x%llx\n", alto_mask);
+      printf("alto_mask = 0x%llu%llu\n", (unsigned long long)(alto_mask >> 64), (unsigned long long)alto_mask);
+
     } // end setup_packed_alto
     
     void create_direct_access_memory(int rank) const {
