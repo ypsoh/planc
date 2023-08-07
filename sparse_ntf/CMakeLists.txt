@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.6 FATAL_ERROR)
 set(ARMA_USE_WRAPPER true)
 
-project(NTF CXX)
+project(NTF LANGUAGES CXX CUDA)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -23,7 +23,11 @@ message(STATUS "CMAKE_REQUIRED_INCLUDES   = ${CMAKE_REQUIRED_INCLUDES}"  )
 message(STATUS "*** libraries:")
 message(STATUS "*** NTFLIB_LIBS = ${NTFLIB_LIBS} ${NMFLIB_LIBS}")
 
-add_definitions(-fopenmp)
+# set(CUDA_INCLUDE_DIRS ${NTF_SOURCE_DIR}/blcotensor_gpu)
+# set(CUDA_NVCC_FLAGS "-arch=sm_30" CACHE STRING "nvcc flags" FORCE)
+# set(CUDA_VERBOSE_BUILD ON CACHE BOOL "nvcc verbose" FORCE)
+
+# add_definitions(-fopenmp)
 
 include_directories(
   ${ARMADILLO_INCLUDE_DIR}
@@ -35,20 +39,39 @@ include_directories(
   ${Boost_INCLUDE_DIR}
   ${MKL_INCLUDE_DIR}
   ${OPENBLAS_INCLUDE_DIR}
+  # ${CUDA_INCLUDE_DIRS}
+  ${NTF_SOURCE_DIR}/blcotensor_gpu/include
 )
+
+set(CMAKE_CUDA_COMPILER ${CMAKE_CUDA_COMPILER})
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=sm_80")
+
+set(CUDA_SOURCES blcotensor_gpu/blco.cu)  # set(CUDA_NVCC_FLAGS "-arch=sm_30" CACHE STRING "nvcc flags" FORCE)
 
 add_executable(sparse_ntf
 sparse_ntf.cpp
 )
 
+add_library(blco_gpu ${CUDA_SOURCES})
+
+# target_include_directories(sparse_ntf PRIVATE ${CUDA_INCLUDE_DIRS})
+
 # target_compile_features(sparse_ntf PRIVATE cxx_std_17)
-target_link_libraries(sparse_ntf ${NTFLIB_LIBS} ${NMFLIB_LIBS})
-# target_compile_options(sparse_ntf PRIVATE
-#   -march=native
-#   -static
-#   -O3
-#   -D_GLIBCXX_PARALLEL
-# )
+# target_link_libraries(sparse_ntf PRIVATE ${NTF_SOURCE_DIR}/blcotensor_gpu)
+# target_link_directories(sparse_ntf PRIVATE ${NTF_SOURCE_DIR}/blcotensor_gpu)
+target_compile_options(sparse_ntf PRIVATE
+  # -march=native
+  # -static
+  -fopenmp
+  # -O3
+  # -D_GLIBCXX_PARALLEL
+)
+# set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=sm_80")
+target_include_directories(blco_gpu PRIVATE ${NTF_SOURCE_DIR}/blcotensor_gpu/include)
+
+# Optionally, link any other necessary libraries
+target_link_libraries(blco_gpu PRIVATE ${CUDA_LIBRARIES})
+target_link_libraries(sparse_ntf ${NTFLIB_LIBS} ${NMFLIB_LIBS} blco_gpu)
 
 install(TARGETS sparse_ntf
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}

@@ -21,9 +21,10 @@
 #include "common/ncpfactors.hpp"
 #include "common/bitops.hpp"
 #include "common/alto_tensor.hpp"
-#include "common/cuda_utils.hpp"
+#include "blco.h"
 #include "cassert"
 
+// #include "include/blcotensor_gpu"
 #define _IType unsigned long long
 
 namespace planc {
@@ -35,33 +36,7 @@ namespace planc {
 
   // A single block in the BLCO format. Note we force 64 bit as the LIT type
   // template <typename LIT>
-  struct BLCOBlock {
-
-
-    _IType m_modes;
-    _IType m_numel;
-
-    double * vals; // offset pointers into main memory 
-    _IType * idx;  // offset pointers into main memory
-
-    // Length `nmodes` array, the coordinates of this block in the BLCO tensor
-    // needed to retreive original alto idx and to eventually original index
-    unsigned long long * block_coords = nullptr;
-
-    // double** pmatrices_staging_ptr = nullptr;
-    // double** pmatrices = nullptr;
-
-  };
   
-  inline BLCOBlock * generate_block_host(_IType N, _IType nnz) {
-    BLCOBlock * b = new BLCOBlock;
-    check_cuda(cudaMallocHost(
-      &b->block_coords, sizeof(_IType) * N), "cudaMallocHost block_coords");
-    b->m_modes = N;
-    b->m_numel = nnz;
-    return b;
-  }
-
   template <typename LIT>
   class BLCOTensor : public planc::ALTOTensor<LIT> {
     public:
@@ -82,10 +57,14 @@ namespace planc {
         double wtime_s, wtime;
 
         // Pin memory on host
-        check_cuda(
-          cudaMallocHost((void**)&this->m_blco_indices, sizeof(unsigned long long) * this->m_numel), "cudaMallocHost coords"); // Pinned mem
-        check_cuda(
-          cudaMallocHost((void**)&this->m_blco_values, sizeof(double) * this->m_numel), "cudaMallocHost values");
+        this->m_blco_indices = (unsigned long long *)malloc(sizeof(unsigned long long) * this->m_numel);
+        this->m_blco_values = (double *) malloc(sizeof(double) * this->m_numel);
+
+        // change to cuda code
+        // check_cuda(
+        //   cudaMallocHost((void**)&this->m_blco_indices, sizeof(unsigned long long) * this->m_numel), "cudaMallocHost coords"); // Pinned mem
+        // check_cuda(
+        //   cudaMallocHost((void**)&this->m_blco_values, sizeof(double) * this->m_numel), "cudaMallocHost values");
 
         wtime_s = omp_get_wtime();
 
@@ -251,12 +230,23 @@ namespace planc {
             printf("block coord for mode: %d\t 0x%llx\n", m, b->block_coords[m]);
           }
         }
+        // free ALTO related stuff
+        //  -- not ideal and kind of hacky since we're using std::vectors
+        this->m_alto_data.clear(); // doesn't guarantee
+        this->m_alto_data.shrink_to_fit(); // C++11
+        this->m_alto_indices.clear();
+        this->m_alto_indices.shrink_to_fit();
+        this->m_partition_intervals.clear();
+        this->m_partition_intervals.shrink_to_fit();
+        this->m_partition_ptr.clear();
+        this->m_partition_ptr.shrink_to_fit();
       }
-  };  
-
-
-
-
+      void mttkrp(const int target_mode, MAT *i_factors, MAT *o_mttkrp) const {
+        INFO << "MTTKRP to be implemented..." << std::endl;
+        _hello();
+        exit(1);
+      }
+  };
 }
 
 
