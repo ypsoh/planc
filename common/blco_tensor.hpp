@@ -47,8 +47,8 @@ namespace planc {
       unsigned long long * m_blco_indices;
       double* m_blco_values;
 
-      int m_blco_mode_pos[MAX_NUM_MODES];
-      unsigned long long m_blco_mode_mask[MAX_NUM_MODES];
+      int * m_blco_mode_pos[MAX_NUM_MODES];
+      unsigned long long * m_blco_mode_mask[MAX_NUM_MODES];
 
       BLCOBlock ** m_blocks = nullptr;
       int m_block_count = 0;
@@ -241,13 +241,45 @@ namespace planc {
         this->m_partition_ptr.clear();
         this->m_partition_ptr.shrink_to_fit();
       }
+
       void mttkrp(const int target_mode, MAT *i_factors, MAT *o_mttkrp) const {
-        INFO << "MTTKRP to be implemented..." << std::endl;
+        INFO << "Copying BLCO tensor to GPU device..." << std::endl;
+        send_blcotensor_to_gpu();
+        allocate_gpu_mem();
+        send_masks_to_gpu();
+
+        send_factors_to_gpu();
+        // now start mttkrp
         _hello();
         exit(1);
       }
+
+      void send_blcotensor_to_gpu() {
+        bool stream_data = false; // change afterwards
+        bool do_batching = false; // change afterwards
+
+        _IType num_streams = 8;
+        _IType max_block_size = this->m_max_block_size;
+        if (!stream_data) {
+          num_streams = this->m_block_count;
+          max_block_size = 0;
+        }
+
+        BLCOTensorDev * blco_dev = copy_blcotensor_to_device(
+          max_block_size,
+          this->m_modes,
+          (unsigned int * const)this->m_dimensions.memptr(),
+          this->m_numel,
+          this->m_blco_mode_mask,
+          this->m_blco_mode_pos,
+          this->m_block_count,
+          this->m_blocks
+        );
+        INFO << "generated blco tensor on device" << std::endl;
+        // pin_gpu_mem(blco_dev, );
+        send_blco_to_gpu();        
+      }
   };
 }
-
 
 #endif

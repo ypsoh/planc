@@ -12,7 +12,6 @@
 #include "ntf/ntfmu.hpp"
 #include "ntf/ntfnes.hpp"
 
-
 #if ALTO_MASK_LENGTH == 64
   typedef unsigned long long LIType;
 #elif ALTO_MASK_LENGTH == 128

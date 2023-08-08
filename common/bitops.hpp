@@ -5,7 +5,7 @@
 #include <immintrin.h>
 #endif
 
-// #define ALT_PEXT 1
+#define ALT_PEXT 1
 #ifndef ALT_PEXT
 static inline unsigned long long //__attribute__((target("bmi2")))
 pdep(unsigned long long x, unsigned long long y)
@@ -94,7 +94,7 @@ pdep(int x, unsigned __int128 y)
 
   int shift = __builtin_popcountll(ylow);
   unsigned __int128 res = pdep((unsigned long long) (x >> shift), (unsigned long long) (y >> 64));
-  res = pdep(x, ylow) | (res << 64);
+  res = pdep((unsigned long long) x, ylow) | (res << 64);
   return res;
 }
 

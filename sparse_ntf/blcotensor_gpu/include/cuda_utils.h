@@ -12,6 +12,8 @@
 #define NUM_STREAMS 8 // set CUDA_DEVICE_MAX_CONNECTIONS env = 1 to 32 (default is 8)
 #define LVL3_MAX_MODE_LENGTH 100
 
+#define _IType unsigned long long
+#define _FType double
 // Crashes if the given CUDA error status is not successful
 //
 // Parameters:
@@ -19,13 +21,7 @@
 //  - message: a provided error string to display alongside the error
 // Returns:
 //  - none
-void check_cuda(cudaError_t status, std::string message) {
-  if (status != cudaSuccess) {
-    std::cerr << "Error: " << cudaGetErrorString(status);
-    std::cerr << ". " << message << std::endl;
-    exit(EXIT_FAILURE);
-  }
-}
+void check_cuda(cudaError_t status, std::string message);
 
 // Crashes if the given cuBLAS error status is not successful
 //
@@ -34,13 +30,9 @@ void check_cuda(cudaError_t status, std::string message) {
 //  - message: a provided error string to display alongside the error
 // Returns:
 //  - none
-void check_cublas(cublasStatus_t status, std::string message) {
-  if (status != CUBLAS_STATUS_SUCCESS) {
-    std::cerr << "Error: " << cublasGetStatusString(status);
-    std::cerr << ". " << message << std::endl;
-    exit(EXIT_FAILURE);
-  }
-}
+void check_cublas(cublasStatus_t status, std::string message);
 
+template <typename T> 
+T* make_device_copy(T* vector, _IType n, std::string name);
 
 #endif // CUDA_UTILS_H_

@@ -46,7 +46,10 @@ include_directories(
 set(CMAKE_CUDA_COMPILER ${CMAKE_CUDA_COMPILER})
 set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -arch=sm_80")
 
-set(CUDA_SOURCES blcotensor_gpu/blco.cu)  # set(CUDA_NVCC_FLAGS "-arch=sm_30" CACHE STRING "nvcc flags" FORCE)
+set(CUDA_SOURCES 
+  blcotensor_gpu/blco.cu
+  blcotensor_gpu/cuda_utils.cu
+  )  # set(CUDA_NVCC_FLAGS "-arch=sm_30" CACHE STRING "nvcc flags" FORCE)
 
 add_executable(sparse_ntf
 sparse_ntf.cpp

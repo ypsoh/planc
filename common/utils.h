@@ -52,6 +52,7 @@ enum helptype { NMF, DISTNMF, NTF, DISTNTF, JOINTNMF, DISTJOINTNMF, HIERNMF };
 #define RAND_SEED_SPARSE 100
 #define WTRUE_SEED 1196089
 #define HTRUE_SEED 1230587
+#define MAX_NUM_MODES 5
 
 // defines for namespace confusion
 #define FMAT arma::fmat
