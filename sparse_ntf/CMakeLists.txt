@@ -73,6 +73,7 @@ target_compile_options(sparse_ntf PRIVATE
 target_include_directories(blco_gpu PRIVATE ${NTF_SOURCE_DIR}/blcotensor_gpu/include)
 
 # Optionally, link any other necessary libraries
+# target_link_libraries(blco_gpu PRIVATE ${CUDA_LIBRARIES} ${NTFLIB_LIBS}) // blco_gpu needs armadillo lib??
 target_link_libraries(blco_gpu PRIVATE ${CUDA_LIBRARIES})
 target_link_libraries(sparse_ntf ${NTFLIB_LIBS} ${NMFLIB_LIBS} blco_gpu)
 

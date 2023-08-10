@@ -47,8 +47,8 @@ namespace planc {
       unsigned long long * m_blco_indices;
       double* m_blco_values;
 
-      int * m_blco_mode_pos[MAX_NUM_MODES];
-      unsigned long long * m_blco_mode_mask[MAX_NUM_MODES];
+      int * m_blco_mode_pos;
+      unsigned long long * m_blco_mode_mask;
 
       BLCOBlock ** m_blocks = nullptr;
       int m_block_count = 0;
@@ -60,6 +60,9 @@ namespace planc {
         this->m_blco_indices = (unsigned long long *)malloc(sizeof(unsigned long long) * this->m_numel);
         this->m_blco_values = (double *) malloc(sizeof(double) * this->m_numel);
 
+        this->m_blco_mode_pos = (int *)malloc(sizeof(int) * MAX_NUM_MODES);
+        this->m_blco_mode_mask = (unsigned long long *)malloc(sizeof(unsigned long long) * MAX_NUM_MODES);
+        
         // change to cuda code
         // check_cuda(
         //   cudaMallocHost((void**)&this->m_blco_indices, sizeof(unsigned long long) * this->m_numel), "cudaMallocHost coords"); // Pinned mem
@@ -225,7 +228,7 @@ namespace planc {
         // print block stuff
         for (int block_idx = 0; block_idx < total_blocks_split; ++block_idx) {
           BLCOBlock * b = this->m_blocks[block_idx];
-          printf("bidx: %d, nnz: %d\n", block_idx, b->m_numel);
+          printf("bidxDimensions: %d, nnz: %d\n", block_idx, b->m_numel);
           for (int m = 0; m < b->m_modes; ++m) {
             printf("block coord for mode: %d\t 0x%llx\n", m, b->block_coords[m]);
           }
@@ -244,17 +247,28 @@ namespace planc {
 
       void mttkrp(const int target_mode, MAT *i_factors, MAT *o_mttkrp) const {
         INFO << "Copying BLCO tensor to GPU device..." << std::endl;
-        send_blcotensor_to_gpu();
-        allocate_gpu_mem();
-        send_masks_to_gpu();
+        BLCOTensorGPU * bt = this->send_blcotensor_to_gpu();
 
-        send_factors_to_gpu();
+
+        MAT_GPU * o_mttkrp_gpu = send_mat_to_gpu(o_mttkrp);
+        MAT_GPU ** i_factors_gpu = send_mats_to_gpu(i_factors, this->m_modes);
+        INFO << "Copied input factors and output mttkrp to GPU device..." << std::endl;
+
+        // unsigned int rank = i_factors[i_n].ncols;
+        // dimensions
+        // need to copy num_modes x (dims[m] * rank ) x sizeof(double)
+
+
+        // this->send_o_factors_to_gpu();
+        // allocate_gpu_mem();
+
+        // send_factors_to_gpu();
         // now start mttkrp
         _hello();
         exit(1);
       }
 
-      void send_blcotensor_to_gpu() {
+      BLCOTensorGPU * send_blcotensor_to_gpu() const {
         bool stream_data = false; // change afterwards
         bool do_batching = false; // change afterwards
 
@@ -265,21 +279,22 @@ namespace planc {
           max_block_size = 0;
         }
 
-        BLCOTensorDev * blco_dev = copy_blcotensor_to_device(
+        BLCOTensorGPU * blco_dev = copy_blcotensor_to_device(
           max_block_size,
           this->m_modes,
-          (unsigned int * const)this->m_dimensions.memptr(),
+          (unsigned long long *)(this->m_dimensions.memptr()),
           this->m_numel,
           this->m_blco_mode_mask,
           this->m_blco_mode_pos,
           this->m_block_count,
           this->m_blocks
         );
-        INFO << "generated blco tensor on device" << std::endl;
-        // pin_gpu_mem(blco_dev, );
-        send_blco_to_gpu();        
+        INFO << "send_blco_tensor_to_gpu() generated blco tensor on device" << std::endl;
+        return blco_dev;
       }
+
   };
+
 }
 
 #endif

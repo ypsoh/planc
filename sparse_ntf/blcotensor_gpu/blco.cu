@@ -1,9 +1,17 @@
 #include <iostream>
 #include "blco.h"
 #include "cuda_utils.h"
+
 // #include "blco_tensor.hpp"
+#include <cuda_runtime.h>
 #include <cooperative_groups.h>
 #include <chrono>
+
+
+#define MAX_NUM_MODES 5
+
+__constant__ _IType MASKS[MAX_NUM_MODES];
+__constant__  int POS[MAX_NUM_MODES];
 
 BLCOBlock * generate_block_host(_IType N, _IType nnz) {
   BLCOBlock * b = new BLCOBlock;
@@ -27,19 +35,53 @@ BLCOBlock * generate_block_device(_IType N, _IType nnz) {
   return b;
 }
 
-BLCOTensorDev * copy_blcotensor_to_device(
+MAT_GPU * send_mat_to_gpu(MAT * mat) {
+  
+  int num_elements = mat->n_rows * mat->n_cols;
+  
+  MAT_GPU * _mat = new MAT_GPU(mat->n_rows, mat->n_cols);
+  
+  check_cuda(cudaMallocHost(&_mat->vals, sizeof(double) * num_elements), "cudaMalloc mat to gpu");
+  check_cuda(cudaMemcpy(_mat->vals, mat->memptr(), sizeof(double) * num_elements, cudaMemcpyHostToDevice), "cudaMemcpy mat to gpu");
+  return _mat;
+};
+
+MAT_GPU ** send_mats_to_gpu(MAT * mats, int num_modes) {
+  MAT_GPU ** _mats_gpu = new MAT_GPU*[num_modes];
+  for (int m = 0; m < num_modes; ++m) {
+    _mats_gpu[m] = send_mat_to_gpu(&mats[m]);
+  }
+  return _mats_gpu;
+};
+
+// Function to free GPU memory for a MAT_GPU object
+void free_mat_on_gpu(MAT_GPU * mat_gpu) {
+    cudaFree(mat_gpu->vals);  // Free the GPU data memory
+    delete mat_gpu;           // Delete the MAT_GPU object
+}
+
+void free_mats_on_gpu(MAT_GPU ** mats_gpu, int num_modes) {
+    for (int m = 0; m < num_modes; ++m) {
+        // Assuming you have a function to free GPU memory for MAT_GPU
+        free_mat_on_gpu(mats_gpu[m]);
+    }
+    delete[] mats_gpu;
+}
+
+
+BLCOTensorGPU * copy_blcotensor_to_device(
   _IType max_block_size,
   int num_modes,
-  unsigned int * dimensions,
+  unsigned long long * dimensions,
   _IType numels,
   _IType * mode_mask,
   int * mode_pos,
   _IType block_count,
   BLCOBlock ** blocks
   ) {
-    BLCOTensorDev * bt = new BLCOTensorDev;
+    BLCOTensorGPU * bt = new BLCOTensorGPU;
     bt->m_modes = num_modes;
-    bt->m_blco_mode_mask = make_device_copy(mode_mask, num_modes, "cudaMemcpy mode_masks");
+    bt->m_blco_mode_mask = make_device_copy(mode_mask, num_modes, "cudaMemcpy mmakeode_masks");
     bt->dims = make_device_copy(dimensions, num_modes, "cudaMemcpy dimensions");
     
     bt->m_blco_mode_pos = make_device_copy(mode_pos, num_modes, "cudaMemcpy mode_pos");
@@ -54,8 +96,7 @@ BLCOTensorDev * copy_blcotensor_to_device(
     printf("nnz: %d, num_blocks: %d, num_modes: %d\n",
       bt->m_numel, bt->m_num_blocks, bt->m_modes);
     for (int m = 0; m < num_modes; ++m) {
-      printf("mode_mask[%d]: %llx, mode_pos: %d\n", bt->m_blco_mode_mask[m], bt->m_blco_mode_pos[m]);
-      printf("bt->dims[%d]: %d\n", m, bt->dims[m]);
+      printf("mode_mask[%d]: %llx, mode_pos: %d\n", m, mode_mask[m], mode_pos[m]);
     }
 
     // what is this for?
@@ -77,15 +118,18 @@ BLCOTensorDev * copy_blcotensor_to_device(
     }
     printf("====== Created BLCOBLocks ======\n");
 
+    cudaMemcpyToSymbol(MASKS, mode_mask, num_modes * sizeof(_IType));
+    cudaMemcpyToSymbol(POS, mode_pos, num_modes * sizeof(int));
+    printf("===== BLCO mask sent to gpu =====\n");
+
     // if (do_batching) bt->warp_info_gpu
     return bt;
 };
 
 void send_blco_to_gpu(){
-
+  
 };
 
-void send_masks_to_gpu(){};
 void allocate_gpu_mem(){};
 void send_factors_to_gpu(){};
 
