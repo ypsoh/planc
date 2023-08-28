@@ -17,32 +17,22 @@
 #include <vector>
 #include <unordered_map>
 #include <cmath>
+#include <chrono>
 #include "common/utils.h"
 #include "common/ncpfactors.hpp"
 #include "common/bitops.hpp"
 #include "common/alto_tensor.hpp"
+// GPU kernels
 #include "blco.h"
+
 #include "cassert"
 
-// #include "include/blcotensor_gpu"
 #define _IType unsigned long long
 
-namespace planc {
-  // forward declaration
-  // template <typename LIT> 
-  // class BLCOTensor;
-  
-  // struct BLCOBlock;
-
-  // A single block in the BLCO format. Note we force 64 bit as the LIT type
-  // template <typename LIT>
-  
+namespace planc {  
   template <typename LIT>
   class BLCOTensor : public planc::ALTOTensor<LIT> {
     public:
-      int m_num_blocks = 0;
-      int m_max_block_size = 16777216;
-
       // for BLCO tensors
       unsigned long long * m_blco_indices;
       double* m_blco_values;
@@ -51,24 +41,25 @@ namespace planc {
       unsigned long long * m_blco_mode_mask;
 
       BLCOBlock ** m_blocks = nullptr;
-      int m_block_count = 0;
+      int m_num_blocks = 0;
+      int m_max_block_size = 16777216; // currently at 2**24, paper says it supports up to 2**27
 
-      BLCOTensor(std::string filename) : ALTOTensor<LIT>(filename) {
+      // for GPU
+      mutable BLCOTensorGPU* bt_gpu = nullptr;
+      bool use_stream = false;
+
+      BLCOTensor(std::string filename, bool use_stream = false) : ALTOTensor<LIT>(filename), use_stream(use_stream) {
+
         double wtime_s, wtime;
 
         // Pin memory on host
         this->m_blco_indices = (unsigned long long *)malloc(sizeof(unsigned long long) * this->m_numel);
         this->m_blco_values = (double *) malloc(sizeof(double) * this->m_numel);
 
+        // BLCO mode_mask uses only 64bits
         this->m_blco_mode_pos = (int *)malloc(sizeof(int) * MAX_NUM_MODES);
         this->m_blco_mode_mask = (unsigned long long *)malloc(sizeof(unsigned long long) * MAX_NUM_MODES);
         
-        // change to cuda code
-        // check_cuda(
-        //   cudaMallocHost((void**)&this->m_blco_indices, sizeof(unsigned long long) * this->m_numel), "cudaMallocHost coords"); // Pinned mem
-        // check_cuda(
-        //   cudaMallocHost((void**)&this->m_blco_values, sizeof(double) * this->m_numel), "cudaMallocHost values");
-
         wtime_s = omp_get_wtime();
 
         int truncated_bitcounts[MAX_NUM_MODES];
@@ -158,9 +149,6 @@ namespace planc {
         wtime = omp_get_wtime() - wtime_s;
         printf("BLCO: Histogram time = %f (s)\n", wtime);
         
-        for (int bidx = 0; bidx < block_count; ++bidx) {
-          printf("block %d: %d\n", bidx, block_histogram[bidx]);
-        }
         // we may have to split the blocks further if it contains too many nnzs
         wtime_s = omp_get_wtime();
         unsigned long long total_blocks_split = 0;
@@ -184,7 +172,7 @@ namespace planc {
         // BLCOBlock** blocks = new BLCOBlock*[total_blocks_split];
 
         this->m_blocks = new BLCOBlock*[total_blocks_split];
-        this->m_block_count = total_blocks_split;
+        this->m_num_blocks = total_blocks_split;
         // this->block_count = total_blocks_split;
 
         int curr_blocks = 0;
@@ -202,7 +190,7 @@ namespace planc {
               // from ALTO perspective, mode_idx will contain the bit mask information 
               // if block index is 101 
               // and mode_mask for uhalf for a mode is 011, 
-              // alto needs to know that 001 to get original coordinate
+              // alto needs to know that 001 (101 & 011 -> 001) to get original coordinate for that mode
               unsigned long long mode_idx = pext(block, mode_mask);
               mode_idx <<= truncated_bitcounts[i]; // shift it back up to block idx space
               block_coords[i] = mode_idx;
@@ -211,7 +199,7 @@ namespace planc {
             // Generate split block, indices are just offset pointers into main array
             for (int stride = 0; stride < nnz; stride += this->m_max_block_size) {
               int nnz_split_block = std::min(this->m_max_block_size, nnz - stride);
-              BLCOBlock* blk = generate_block_host(this->m_modes, nnz_split_block);
+              BLCOBlock* blk = generate_blco_block_host(this->m_modes, nnz_split_block);
               blk->idx = this->m_blco_indices + start + stride;
               blk->vals = this->m_blco_values + start + stride;
               this->m_blocks[curr_blocks] = blk;
@@ -225,14 +213,33 @@ namespace planc {
         printf("BLCO: Blocking time = %f (s)\n", wtime);
         printf("Num. blocks: %d\tTotal blocks: %d\n\n", block_count, total_blocks_split);
 
-        // print block stuff
-        for (int block_idx = 0; block_idx < total_blocks_split; ++block_idx) {
-          BLCOBlock * b = this->m_blocks[block_idx];
-          printf("bidxDimensions: %d, nnz: %d\n", block_idx, b->m_numel);
-          for (int m = 0; m < b->m_modes; ++m) {
-            printf("block coord for mode: %d\t 0x%llx\n", m, b->block_coords[m]);
+        // Generate / Allocate BLCOtensor on GPU
+        this->bt_gpu = generate_blco_tensor_gpu(
+          m_max_block_size,
+          this->m_modes,
+          (unsigned long long *)this->m_dimensions.memptr(),
+          this->m_numel,
+          this->m_blco_mode_mask,
+          this->m_blco_mode_pos,
+          this->m_num_blocks,
+          this->m_blocks,
+          use_stream // if using stream will not alloc cudaMemory for blocks in constructor
+        );
+
+        if (!use_stream) {
+          for (int b = 0; b < this->m_num_blocks; ++b) {
+            // copying block coords, idx, vals to cudaMem
+            send_blco_block_gpu(this->m_blocks[b], this->bt_gpu->m_blocks[b]);
           }
         }
+        // for (int block_idx[] = 0; block_idx < total_blocks_split; ++block_idx) {
+        // print block stuff
+        //   BLCOBlock * b = this->m_blocks[block_idx];
+        //   printf("bidxDimensions: %d, nnz: %d\n", block_idx, b->m_numel);
+        //   for (int m = 0; m < b->m_modes; ++m) {
+        //     printf("block coord for mode: %d\t 0x%llx\n", m, b->block_coords[m]);
+        //   }
+        // }
         // free ALTO related stuff
         //  -- not ideal and kind of hacky since we're using std::vectors
         this->m_alto_data.clear(); // doesn't guarantee
@@ -245,56 +252,87 @@ namespace planc {
         this->m_partition_ptr.shrink_to_fit();
       }
 
+      // REFACTOR -- mttkrp is defined in CPU BLCOTensor when in actuality
+      // it only runs on BLCOTensorGPU so it doesn't make much sense being here
+      // note the cudaStream_t being used here
+      // but yet it is here since separating C++ code and cuda code isn't quite 
+      // clear how to do yet... and keeping mttkrp API here as is makes the api with AUNTF calls compatible
       void mttkrp(const int target_mode, MAT *i_factors, MAT *o_mttkrp) const {
-        INFO << "Copying BLCO tensor to GPU device..." << std::endl;
-        BLCOTensorGPU * bt = this->send_blcotensor_to_gpu();
-
-
+        // pin o_mttkrp memory on cpu
+        size_t o_mttkrp_size = o_mttkrp->n_cols * o_mttkrp->n_rows * sizeof(double);
+        check_cuda(cudaHostRegister(o_mttkrp->memptr(), o_mttkrp_size, cudaHostRegisterDefault),
+         "pin o_mttkrp memory on host");
         MAT_GPU * o_mttkrp_gpu = send_mat_to_gpu(o_mttkrp);
         MAT_GPU ** i_factors_gpu = send_mats_to_gpu(i_factors, this->m_modes);
-        INFO << "Copied input factors and output mttkrp to GPU device..." << std::endl;
 
-        // unsigned int rank = i_factors[i_n].ncols;
-        // dimensions
-        // need to copy num_modes x (dims[m] * rank ) x sizeof(double)
+        set_mat_to_zero(o_mttkrp_gpu);
+        
+        int target_mode_dim = o_mttkrp->n_cols;
+        int rank = o_mttkrp->n_rows;
 
-
-        // this->send_o_factors_to_gpu();
-        // allocate_gpu_mem();
-
-        // send_factors_to_gpu();
-        // now start mttkrp
-        _hello();
-        exit(1);
-      }
-
-      BLCOTensorGPU * send_blcotensor_to_gpu() const {
-        bool stream_data = false; // change afterwards
-        bool do_batching = false; // change afterwards
-
-        _IType num_streams = 8;
-        _IType max_block_size = this->m_max_block_size;
-        if (!stream_data) {
-          num_streams = this->m_block_count;
-          max_block_size = 0;
+        if (!use_stream) {
+          for (_IType b = 0; b < bt_gpu->m_num_blocks; ++b) {
+            mttkrp_lvl1(
+              bt_gpu->m_blocks[b],
+              o_mttkrp_gpu, // MAT_GPU*게
+              i_factors_gpu, // MAT_GPU**
+              target_mode, // int
+              rank,
+              bt_gpu->dims,
+              bt_gpu->m_streams[0] // use single stream
+            );
+          }
+          // No need to free m_blocks since it will be reused
         }
+        else { // streaming blocks
+          // alloc memory required for streaming
+          for (_IType b = 0; b < bt_gpu->m_num_blocks; ++b) {
+            bt_gpu->m_blocks[b] = generate_blco_block_gpu(this->m_blocks[b]);
+            check_cuda(cudaStreamCreate(&bt_gpu->m_streams[b]), "cudaStreamCreate");
+          }
 
-        BLCOTensorGPU * blco_dev = copy_blcotensor_to_device(
-          max_block_size,
-          this->m_modes,
-          (unsigned long long *)(this->m_dimensions.memptr()),
-          this->m_numel,
-          this->m_blco_mode_mask,
-          this->m_blco_mode_pos,
-          this->m_block_count,
-          this->m_blocks
-        );
-        INFO << "send_blco_tensor_to_gpu() generated blco tensor on device" << std::endl;
-        return blco_dev;
+          _IType thread_coal_factor = 4;
+          _IType stream_id = bt_gpu->m_num_blocks - 1;
+          for (_IType b = 0; b < bt_gpu->m_num_blocks; ++b) {
+            stream_id = (stream_id + 1) % bt_gpu->m_num_blocks;
+            cudaStream_t stream = bt_gpu->m_streams[stream_id];
+
+            send_blco_block_gpu_async(m_blocks[b], bt_gpu->m_blocks[b], stream);
+
+            mttkrp_lvl2(
+              bt_gpu->m_blocks[b],
+              o_mttkrp_gpu, // MAT_GPU*
+              i_factors_gpu, // MAT_GPU**
+              target_mode, // int
+              rank,
+              target_mode_dim,
+              thread_coal_factor,
+              stream
+            );
+            // after stream sync should release m_blocks once we're done here??
+          }
+  
+          check_cuda(cudaDeviceSynchronize(), "copy mttkrp result back to host");
+
+          // free blocks since assumption for streaming is that it doesn't entirely fit in GPU
+          for (_IType b = 0; b < bt_gpu->m_num_blocks; ++b) {
+            cudaFree(bt_gpu->m_blocks[b]->vals);
+            cudaFree(bt_gpu->m_blocks[b]->idx);
+            cudaFree(bt_gpu->m_blocks[b]->block_coords);
+          }
+        }
+        
+        // Copy o_mttkrp_gpu back to host
+        send_mat_to_host(o_mttkrp_gpu, o_mttkrp);
+        check_cuda(cudaDeviceSynchronize(), "copy mttkrp result back to host");
+        
+        // Clean up gpu stuff
+        // Unregister host memory
+        cudaHostUnregister(o_mttkrp->memptr());
+        cudaFree(o_mttkrp_gpu->vals);
+        for (int m = 0; m < this->m_modes; ++m) cudaFree(i_factors_gpu[m]->vals);
       }
-
   };
-
 }
 
 #endif

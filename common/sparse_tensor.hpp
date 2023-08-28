@@ -14,6 +14,7 @@
 #include <random>
 #include <string>
 #include <type_traits>
+
 #include <utility>
 #include <vector>
 #include <unordered_map>
@@ -49,53 +50,60 @@ class SparseTensor {
       this->m_numel = 0;
     }
 
-    SparseTensor(std::string filename): m_numel(0) {
+    SparseTensor(std::string filename): m_numel(0), m_modes(0) {
+      
       std::cout << "Reading tensor from " << filename << std::endl;
-
       std::ifstream ifs(filename, std::ios_base::in);
       std::string line;
 
       int nmodes = 0;
-      int* dims = NULL;
       std::string element;
 
-      ifs.seekg(0); // go back to beginning of file to read non zeros
+      // ifs.seekg(0); // go back to beginning of file to read non zeros
 
+      // first time reading tensor, traverse to end to 
+      // 1. count number of modes 2. count nnzs
+      int _nnz = 0;
       while (std::getline(ifs, line, '\n')) {
-        // for every line
-        std::stringstream _line(line);
         if (nmodes == 0) {
+          std::stringstream _line(line);
           while(_line >> element) {
             nmodes++;
           }
           nmodes--; // since the last element is the value not coordinate
           this->m_modes = nmodes;
-
-          // set the coodrinate vectors
-          for (int i = 0; i < nmodes; ++i) {
-            std::vector<int> mode_indices;
-            this->m_indices.push_back(std::vector<int>());
-            // required for mapping raw indices to compact indices
-            this->m_compact_indices.push_back(std::vector<int>());
-          }
-          ifs.seekg(0);
-          continue;
         }
-        int index = 0;
-        while (_line >> element) {
-          if (index < nmodes) {
-            this->m_indices[index].push_back(std::stoi(element));
-          } else {
-            this->m_data.push_back(std::stod(element));
-          }
-          index++;
-        }
-        this->m_numel++;
+        _nnz++;
       }
+      m_numel = _nnz;
+
+      // set vector size to predetermined size
+      this->m_indices.resize(this->m_modes);
+      for (int m = 0; m < this->m_modes; ++m) {
+        this->m_indices[m].resize(this->m_numel);
+      }
+      this->m_data.resize(this->m_numel);
+
+      // go back to beginning to parse idx and values
+      ifs.clear();
+      ifs.seekg(0);
+
+      unsigned long long nnz_idx = 0;
+
+      while (std::getline(ifs, line, '\n')) {
+        int mode_idx = 0;
+        char * ptr = &line[0];
+        for (int m = 0; m < this->m_modes; ++m) {
+          this->m_indices[m][nnz_idx] = (int) strtol(ptr, &ptr, 10);
+        }
+        this->m_data[nnz_idx] = (double) strtod(ptr, &ptr);
+        ++nnz_idx;
+      }
+
       // Map the 'raw' indices of the non zeros to a
       // corresponding row in a factor matrix starting from 0
-      map_to_compact_indices();
-
+      map_to_compact_indices(false);
+      
       // instantiate the omp_lock_ts
       m_locks.resize(longest_mode());
       for (auto lock : m_locks) {
@@ -108,26 +116,39 @@ class SparseTensor {
     Used to map original indices to compact indices
     (e.g. (34, 32, 53, 32) --> (0, 1, 2, 1))
     */
-    void map_to_compact_indices() {
+    void map_to_compact_indices(bool do_remap) {
       this->m_dimensions = UVEC(this->m_modes);
+      this->m_compact_indices.resize(this->m_modes);
+      this->m_mappings.resize(this->m_modes);
 
-      for (int m = 0; m < this->m_modes; ++m) {
-        this->m_compact_indices.push_back(std::vector<int>());
-        this->m_mappings.push_back(std::unordered_map<int, int>());
-      }
-
-      for (int m = 0; m < this->m_modes; ++m) {
-        int new_index = 0;
-        for (int index: this->m_indices[m]) { // original indices
-          if (this->m_mappings[m].find(index) == this->m_mappings[m].end()) {
-            this->m_mappings[m][index] = new_index++;
+      // Remapping is usually needed for real datasets where there is no guarantee 
+      // all indices will be occupied, the "remapping -- if(false)" is due to the 
+      // the 0 or 1 offset issue
+      if (do_remap) {
+        for (int m = 0; m < this->m_modes; ++m) {
+          int new_index = 0;
+          for (int index: this->m_indices[m]) { // original indices
+            if (this->m_mappings[m].find(index) == this->m_mappings[m].end()) {
+              this->m_mappings[m][index] = new_index++;
+            }
+            this->m_compact_indices[m].push_back(this->m_mappings[m][index]);
           }
-          this->m_compact_indices[m].push_back(this->m_mappings[m][index]);
+        }
+        for (int m = 0; m < this->m_modes; ++m) {
+          this->m_dimensions[m] = this->m_mappings[m].size();
         }
       }
-
-      for (int m = 0; m < this->m_modes; ++m) {
-        this->m_dimensions[m] = this->m_mappings[m].size();
+      else {
+        for (int m = 0; m < this->m_modes; ++m) {
+          // find scope
+          int max_idx = arma::max(arma::Col<int>(this->m_indices[m]));
+          int min_idx = arma::min(arma::Col<int>(this->m_indices[m]));
+          int scope = max_idx - min_idx;
+          for (int index: this->m_indices[m]) {
+            this->m_compact_indices[m].push_back(index-1);
+          };
+          this->m_dimensions[m] = max_idx;
+        }
       }
     }
     // TODO: Will implement once basic Sparse TF is done
@@ -244,6 +265,7 @@ class SparseTensor {
           for (int m = 0; m < m_modes; ++m) {
             if (m != i_n) {
               unsigned int row_id = m_compact_indices[m][i];
+              // unsigned int row_id = 0;
               for (int r = 0; r < rank; ++r) {
                 row[r] *= i_factors[m](row_id, r);
               }
@@ -259,6 +281,8 @@ class SparseTensor {
           omp_unset_lock(&(m_locks[dest_row_id]));
         } // for each non-zero
       } // #pragma omp parallel
+      printf("norm of first mttkrp output -- mode: %d: %f\n", i_n, arma::norm(*o_mttkrp, "fro"));
+      // exit(0);
     }
 };
 }

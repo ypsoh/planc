@@ -141,16 +141,35 @@ class AUNTF {
     such as computing explicit mttkrp and KR product we decide to separate
   */
   void computeSparseNTF() {
+    double wtime;
+    double wtime_gram;
+    double wtime_mttkrp;
+    double wtime_update;
+    double wtime_update_fm;
+    
     for (m_current_it = 0; m_current_it < m_num_it; m_current_it++) {
       INFO << "iter::" << this->m_current_it << std::endl;
       for (int j = 0; j < this->m_input_tensor.modes(); j++) {
+        wtime = omp_get_wtime();
         m_ncp_factors.gram_leave_out_one(j, &gram_without_one);
+        wtime_gram = omp_get_wtime() - wtime;
         // INFO << "gram_without_" << j << "::" << arma::cond(gram_without_one)
         //     << std::endl
         //     << gram_without_one << std::endl;
+
+        wtime = omp_get_wtime();
         m_input_tensor.mttkrp(j, m_ncp_factors.factors(), &ncp_mttkrp_t[j]);
+        wtime_mttkrp = omp_get_wtime() - wtime;
+
+        wtime = omp_get_wtime();
         MAT factor = update(j);
+        wtime_update = omp_get_wtime() - wtime;
+
+        wtime = omp_get_wtime();
         update_factor_mode(j, factor.t());
+        wtime_update_fm = omp_get_wtime() - wtime;
+
+        printf("[PERF-mode, gram, mttkrp, update, update_fm]\t%d\t%f\t%f\t%f\t%f\n", j, wtime_gram, wtime_mttkrp, wtime_update, wtime_update_fm);
       } // for all modes
 
       if (m_compute_error) {

@@ -5,7 +5,6 @@
 #include <immintrin.h>
 #endif
 
-#define ALT_PEXT 1
 #ifndef ALT_PEXT
 static inline unsigned long long //__attribute__((target("bmi2")))
 pdep(unsigned long long x, unsigned long long y)

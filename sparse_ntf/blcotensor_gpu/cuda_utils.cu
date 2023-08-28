@@ -15,7 +15,6 @@ template unsigned int* make_device_copy(unsigned int* vector, _IType n, std::str
 template unsigned long* make_device_copy(unsigned long* vector, _IType n, std::string name);
 template int* make_device_copy(int* vector, _IType n, std::string name);
 
-
 void check_cublas(cublasStatus_t status, std::string message) {
   if (status != CUBLAS_STATUS_SUCCESS) {
     std::cerr << "Error: " << cublasGetStatusString(status);

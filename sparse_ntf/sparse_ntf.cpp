@@ -19,6 +19,8 @@
 #else
   #pragma message("Using default 128-bit.")
   typedef unsigned __int128 LIType;
+  // typedef unsigned long long LIType;
+
 #endif
 
 
@@ -34,11 +36,15 @@ class SparseNTFDriver {
         std::cout << "Input filename required for SparseNTF operations..." << std::endl;
         exit(1);
       }
-
+      double wtime = omp_get_wtime();
       T my_tensor(filename);
+      printf("[PERF-tensor load]\t%f\n", omp_get_wtime()-wtime);
       my_tensor.print();
-
+      
+      wtime = omp_get_wtime();
       NTFType<T> ntfsolver(my_tensor, pc.lowrankk(), pc.lucalgo());
+      printf("[PERF-fm init]\t%f\n", omp_get_wtime()-wtime);
+      
       // Setting flags. does it need to be here?
       ntfsolver.num_it(pc.iterations());
       ntfsolver.compute_error(pc.compute_error());
@@ -55,14 +61,16 @@ int main(int argc, char* argv[]) {
   switch (pc.lucalgo())
   {
     case MU:
-      // sntfd.callNTF<planc::NTFMU, planc::ALTOTensor<LIType>>(pc);
-      sntfd.callNTF<planc::NTFMU, planc::BLCOTensor<LIType>>(pc);
+      sntfd.callNTF<planc::NTFMU, planc::SparseTensor>(pc);
+      // sntfd.callNTF<planc::NTFMU, planc::BLCOTensor<LIType>>(pc);
       break;
     case HALS:
-      sntfd.callNTF<planc::NTFHALS, planc::ALTOTensor<LIType>>(pc);
+      sntfd.callNTF<planc::NTFMU, planc::ALTOTensor<LIType>>(pc);
+      // sntfd.callNTF<planc::NTFHALS, planc::ALTOTensor<LIType>>(pc);
       break;
     case ANLSBPP:
-      sntfd.callNTF<planc::NTFANLSBPP, planc::ALTOTensor<LIType>>(pc);
+      sntfd.callNTF<planc::NTFMU, planc::BLCOTensor<LIType>>(pc);
+      // sntfd.callNTF<planc::NTFANLSBPP, planc::ALTOTensor<LIType>>(pc);
       break;
     case AOADMM:
       sntfd.callNTF<planc::NTFAOADMM, planc::ALTOTensor<LIType>>(pc);
