@@ -17,6 +17,7 @@
 #include <vector>
 #include <unordered_map>
 #include <cmath>
+#include <algorithm>
 #include "common/utils.h"
 #include "common/ncpfactors.hpp"
 #include "common/bitops.hpp"
@@ -121,18 +122,19 @@ class ALTOTensor : public SparseTensor {
     void sort_alto() {
       UWORD numel = this->numel();
 
-      std::vector<int> inds;
+      // std::vector<int> inds;
+      int * inds = (int *)malloc(numel * sizeof(int));
       std::vector<LIT> temp_inds;
       std::vector<double> temp_val;
 
-      inds.resize(numel);
       temp_inds.resize(numel);
       temp_val.resize(numel);
 
       #pragma omp parallel for
       for (int i = 0; i < numel; ++i) inds[i] = i;
 
-      std::sort(inds.begin(), inds.end(), [&](int a, int b) {
+      // -D_GLIBCXX_PARALLEL
+      std::sort(inds, inds+numel, [&](int a, int b) {
         return m_alto_indices[a] < m_alto_indices[b];
       });
       #pragma omp parallel for
@@ -234,12 +236,13 @@ class ALTOTensor : public SparseTensor {
       int max_num_bits = 0;
       int min_num_bits = sizeof(int) * 8;
 
-      std::vector<MPair> mode_bits(m_modes);
+      // std::vector<MPair> mode_bits(m_modes);
+      MPair* mode_bits = (MPair*)malloc(m_modes * sizeof(MPair));
 
       // initial mode values
       for (int n = 0; n < m_modes; ++n) {
         // this is hard-coded to accomodate 64 bits representation
-        int mbits = (sizeof(unsigned long long int) * 8) - clz(m_dimensions(n)-1);
+        int mbits = (sizeof(unsigned long long) * 8) - clz(m_dimensions(n)-1);
         mode_bits[n].mode = n;
         mode_bits[n].bits = mbits;
         alto_bits_min += mbits;
@@ -252,7 +255,7 @@ class ALTOTensor : public SparseTensor {
       //printf("range of mode bits=[%d %d]\n", min_num_bits, max_num_bits);
       printf("alto_bits_min=%d, alto_bits_max=%d\n", alto_bits_min, alto_bits_max);
 
-      int alto_bits = (int)0x1 << std::max<int>(3, (sizeof(int) * 8) - clz(static_cast<unsigned long long>(alto_bits_min)));
+      int alto_bits = (int)0x1 << std::max<int>(3, (sizeof(int) * 8) - __builtin_clz(alto_bits_min));
       printf("alto_bits=%d\n", alto_bits);
 
       double alto_storage = 0;
@@ -269,10 +272,9 @@ class ALTOTensor : public SparseTensor {
         int level = 0, shift = 0, inc = 1;
 
         if (mo == SHORT_FIRST)
-          std::sort(mode_bits.begin(), mode_bits.end(), [](MPair& a, MPair& b) { return a.bits < b.bits; });
+          std::sort(mode_bits, mode_bits + m_modes, [&](MPair a, MPair b) { return a.bits < b.bits; });
         else if(mo == LONG_FIRST)
-          std::sort(mode_bits.begin(), mode_bits.end(), [](MPair& a, MPair& b) { return a.bits > b.bits; });
-
+          std::sort(mode_bits, mode_bits + m_modes, [&](MPair a, MPair b) { return a.bits > b.bits; });
         if (po == MSB_FIRST) {
           shift = alto_bits_min - 1;
           inc = -1;
@@ -301,8 +303,11 @@ class ALTOTensor : public SparseTensor {
         alto_mask |= ALTO_MASKS[n];
         printf("ALTO_MASKS[%d] = 0x%llx\n", n, ALTO_MASKS[n]);
       }
-      // printf("alto_mask = 0x%llx\n", alto_mask);
-      printf("alto_mask = 0x%llu%llu\n", (unsigned long long)(alto_mask >> 64), (unsigned long long)alto_mask);
+      if (alto_bits > 64) { // 128 bit mask
+        printf("alto_mask = 0x%llx%llx\n", (unsigned long long)(alto_mask >> 64), (unsigned long long)alto_mask);
+      } else {
+        printf("alto_mask = 0x%llx\n", alto_mask);
+      }
 
     } // end setup_packed_alto
     
