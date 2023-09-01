@@ -11,6 +11,7 @@ namespace cg = cooperative_groups;
 __constant__ _IType MASKS[MAX_NUM_MODES];
 __constant__  int POS[MAX_NUM_MODES];
 
+
 template <typename LIT>
 __device__ inline _IType alt_pext(LIT x, int pos, _IType mask, _IType block_coord) {
     return ((x >> pos) & mask) | block_coord;
@@ -614,3 +615,38 @@ __global__ void mttkrp_lvl1_4d_kernel(
     curr_elem += block.size();
   };
 };
+
+void gram_leave_out_one_gpu(int mode, int num_modes, MAT_GPU ** factors, MAT_GPU * gram) {
+  int gram_m = gram->n_rows;
+  int gram_n = gram->n_cols;
+
+  double alpha = 1.0;
+  double beta = 0.0;
+  // Init gram matrix to ones
+  double * temp;
+  check_cuda(cudaMalloc((void**)&temp, sizeof(double) * gram_m * gram_n), "cudaMalloc temp matrix for gram mat");
+  value_fill(gram->vals, gram_m * gram_n, 1.0);
+  check_cuda(cudaDeviceSynchronize(), "value fill");
+
+  cublasHandle_t handle;
+  check_cublas(cublasCreate(&handle), "create cublas handle");
+  int m, n;
+
+  for (int j = 0; j < num_modes; ++j) {
+    if (j != mode) {
+      // gram *= A.T * A
+      m = factors[j]->n_rows;
+      n = factors[j]->n_cols;
+      check_cublas(
+        cublasDgemm(
+          handle, CUBLAS_OP_T, CUBLAS_OP_N, 
+          n, n, m, &alpha, factors[j]->vals, m, factors[j]->vals, m, &beta, temp, n),
+        "computing gram matrix (A.T * A)"
+      );
+      vector_hadamard(gram->vals, temp, gram_m * gram_n);
+      check_cuda(cudaDeviceSynchronize(), "vector hadamard");
+    }
+  }
+  cudaFree(temp);
+  cublasDestroy(handle);
+}

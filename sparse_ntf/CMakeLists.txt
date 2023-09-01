@@ -49,6 +49,8 @@ set(CMAKE_CUDA_COMPILER ${CMAKE_CUDA_COMPILER})
 set(CUDA_SOURCES 
 blcotensor_gpu/blco.cu
 blcotensor_gpu/cuda_utils.cu
+blcotensor_gpu/mu.cu
+blcotensor_gpu/hals.cu
 ) 
 
 set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -std=c++17 -O3 -gencode=arch=compute_80,code=sm_80")

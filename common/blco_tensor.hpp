@@ -252,11 +252,68 @@ namespace planc {
         this->m_partition_ptr.shrink_to_fit();
       }
 
-      // REFACTOR -- mttkrp is defined in CPU BLCOTensor when in actuality
-      // it only runs on BLCOTensorGPU so it doesn't make much sense being here
-      // note the cudaStream_t being used here
-      // but yet it is here since separating C++ code and cuda code isn't quite 
-      // clear how to do yet... and keeping mttkrp API here as is makes the api with AUNTF calls compatible
+      // mttkrp_gpu is a mttkrp kernel that assumes everything is in GPU
+      void mttkrp_gpu(const int target_mode, MAT_GPU ** i_factors_gpu, MAT_GPU *o_mttkrp_gpu) const {
+        // Do mttkrp_gpu for BLCO Tensor
+        // this specific kernel assumes blcotensor is sent to gpu
+        int target_mode_dim = i_factors_gpu[target_mode]->n_rows;
+        int rank = i_factors_gpu[target_mode]->n_cols;
+
+        // o_mttkrp_gpu has size of longest mode of all factor matrices
+        // only zero out based on current mode
+        check_cuda(cudaMemset(
+          o_mttkrp_gpu->vals, 0, 
+          sizeof(double) * target_mode_dim * rank), "memset o_mttkrp_gpu to zero");
+
+        if (!use_stream) {
+          for (_IType b = 0; b < bt_gpu->m_num_blocks; ++b) {
+            mttkrp_lvl1(
+              bt_gpu->m_blocks[b],
+              o_mttkrp_gpu, // MAT_GPU*
+              i_factors_gpu, // MAT_GPU**
+              target_mode, // int
+              rank,
+              bt_gpu->dims,
+              bt_gpu->m_streams[0] // use single stream
+            );
+          }
+          // No need to free m_blocks since it will be reused
+        }
+        else { // streaming blocks
+          // alloc memory required for streaming
+          for (_IType b = 0; b < bt_gpu->m_num_blocks; ++b) {
+            bt_gpu->m_blocks[b] = generate_blco_block_gpu(this->m_blocks[b]);
+            check_cuda(cudaStreamCreate(&bt_gpu->m_streams[b]), "cudaStreamCreate");
+          }
+
+          _IType thread_coal_factor = 4;
+          _IType stream_id = bt_gpu->m_num_blocks - 1;
+          for (_IType b = 0; b < bt_gpu->m_num_blocks; ++b) {
+            stream_id = (stream_id + 1) % bt_gpu->m_num_blocks;
+            cudaStream_t stream = bt_gpu->m_streams[stream_id];
+
+            send_blco_block_gpu_async(m_blocks[b], bt_gpu->m_blocks[b], stream);
+
+            mttkrp_lvl2(
+              bt_gpu->m_blocks[b],
+              o_mttkrp_gpu, // MAT_GPU*
+              i_factors_gpu, // MAT_GPU**
+              target_mode, // int
+              rank,
+              target_mode_dim,
+              thread_coal_factor,
+              stream
+            );
+            // after stream sync should release m_blocks once we're done here??
+          }
+        }
+        check_cuda(cudaDeviceSynchronize(), "mttkrp complete");
+      }
+      // mttkrp kernel, unlike mttkrp_gpu kernel
+      // assumes only the mttkrp operation being offloaded to the GPU
+      // and does all the memcpy operations before and after
+      // whereas mttkrp_gpu kernel assumes everything is offloaded to GPU
+      // and does not do so
       void mttkrp(const int target_mode, MAT *i_factors, MAT *o_mttkrp) const {
         // pin o_mttkrp memory on cpu
         size_t o_mttkrp_size = o_mttkrp->n_cols * o_mttkrp->n_rows * sizeof(double);
@@ -274,7 +331,7 @@ namespace planc {
           for (_IType b = 0; b < bt_gpu->m_num_blocks; ++b) {
             mttkrp_lvl1(
               bt_gpu->m_blocks[b],
-              o_mttkrp_gpu, // MAT_GPU*게
+              o_mttkrp_gpu, // MAT_GPU*
               i_factors_gpu, // MAT_GPU**
               target_mode, // int
               rank,

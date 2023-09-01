@@ -25,11 +25,11 @@ class NCPFactors {
   unsigned int m_k;            /// Low rank
   UVEC m_dimensions;  /// Vector of dimensions for every mode
   /// in the distributed mode all the processes has same lambda
-  VEC m_lambda;
   /// normalize the factors of a matrix
   bool freed_ncp_factors;
 
  public:
+  VEC m_lambda;
   /**
    * constructor that takes the dimensions of every mode, low rank k
    * All the factors will be initialized with random uniform number

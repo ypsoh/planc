@@ -17,15 +17,7 @@
 #define STASH_SIZE 4
 #define INVALID_ID	((_IType) -1)
 
-struct MAT_GPU {
-  int n_rows;
-  int n_cols;
-  
-  double * vals;
-  // constructor
-  MAT_GPU(int r, int c) : n_rows(r), n_cols(c) {}
-  MAT_GPU(): n_rows(0), n_cols(0) {}
-};
+struct MAT_GPU; // declared in cuda_utils.h
 
 struct BLCOBlock {
   int m_modes;
@@ -77,7 +69,6 @@ BLCOBlock * generate_blco_block_gpu(BLCOBlock * block);
 void send_blco_block_gpu(BLCOBlock * blk_host, BLCOBlock * blk_dev);
 void send_blco_block_gpu_async(BLCOBlock * blk_host, BLCOBlock * blk_dev, cudaStream_t stream);
 
-
 void send_blco_to_gpu();
 
 void send_mat_to_host(MAT_GPU * o_mat_gpu, MAT * o_mat_host);
@@ -99,5 +90,10 @@ __global__ void mttkrp_lvl2_3d_kernel();
 __global__ void mttkrp_lvl2_4d_kernel(const _IType* __restrict__ lidx, double * vals, const _IType nnz, const _IType * block_coords, 
                                         _FType* output, _FType* f0, _FType* f1, _FType* f2, _FType* f3,
                                         int target_mode, int rank, int target_mode_dim, _IType thread_coal_factor);
+
+void gram_leave_out_one_gpu(int mode, int num_modes, MAT_GPU ** factors, MAT_GPU * gram);
+
+__global__ void value_fill_kernel(_FType* x, _IType n, _FType val);
+void value_fill(_FType* x, _IType n, _FType val);
 
 #endif
