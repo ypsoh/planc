@@ -10,7 +10,12 @@
 #include "ntf/ntfaoadmm.hpp"
 #include "ntf/ntfhals.hpp"
 #include "ntf/ntfmu.hpp"
+#include "ntf/tfucp.hpp"
 #include "ntf/ntfnes.hpp"
+#include "sparse_ntf/ntfmu_gpu.hpp"
+#include "sparse_ntf/ntfhals_gpu.hpp"
+#include "sparse_ntf/ntfaoadmm_gpu.hpp"
+#include "sparse_ntf/ntfanlsbpp_gpu.hpp"
 
 #if ALTO_MASK_LENGTH == 64
   typedef unsigned long long LIType;
@@ -58,24 +63,85 @@ int main(int argc, char* argv[]) {
   planc::ParseCommandLine pc(argc, argv);
   pc.parseplancopts();
   planc::SparseNTFDriver sntfd;
+
+  //======== hard coded
+  cudaError_t cudaStatus = cudaSetDevice(1);
+  if (cudaStatus != cudaSuccess) {
+    std::cerr << "cudaSetDevice failed! Error: " << cudaGetErrorString(cudaStatus) << std::endl;
+    return 1;
+  }
+  //==========
+
   switch (pc.lucalgo())
   {
     case MU:
-      sntfd.callNTF<planc::NTFMU, planc::SparseTensor>(pc);
-      // sntfd.callNTF<planc::NTFMU, planc::BLCOTensor<LIType>>(pc);
+      switch (pc.gpu_type())
+      {
+      case CPU_ONLY:
+        INFO << "\n\n ===== Running CPU only =====" << "\n\n\n";
+        sntfd.callNTF<planc::NTFMU, planc::ALTOTensor<LIType>>(pc);
+        break;
+      case PARTIAL:
+        INFO << "\n\n ===== Running partial GPU =====" << "\n\n\n";
+        sntfd.callNTF<planc::NTFMU, planc::BLCOTensor<LIType>>(pc);
+        break;
+      case FULL:
+        INFO << "\n\n ===== Running full GPU =====" << "\n\n\n";
+        sntfd.callNTF<planc::NTFMU_GPU, planc::BLCOTensor<LIType>>(pc);
+        break;
+      }
       break;
     case HALS:
-      sntfd.callNTF<planc::NTFMU, planc::ALTOTensor<LIType>>(pc);
-      // sntfd.callNTF<planc::NTFHALS, planc::ALTOTensor<LIType>>(pc);
+      switch (pc.gpu_type())
+      {
+      case CPU_ONLY:
+        INFO << "\n\n ===== Running CPU only =====" << "\n\n\n";
+        sntfd.callNTF<planc::NTFHALS, planc::ALTOTensor<LIType>>(pc);
+        break;
+      case PARTIAL:
+        INFO << "\n\n ===== Running partial GPU =====" << "\n\n\n";
+        sntfd.callNTF<planc::NTFHALS, planc::BLCOTensor<LIType>>(pc);
+        break;
+      case FULL:
+        INFO << "\n\n ===== Running full GPU =====" << "\n\n\n";
+        sntfd.callNTF<planc::NTFHALS_GPU, planc::BLCOTensor<LIType>>(pc);
+        break;
+      }
       break;
     case ANLSBPP:
-      sntfd.callNTF<planc::NTFMU, planc::BLCOTensor<LIType>>(pc);
-      // sntfd.callNTF<planc::NTFANLSBPP, planc::ALTOTensor<LIType>>(pc);
+      switch (pc.gpu_type())
+      {
+      case CPU_ONLY:
+        INFO << "\n\n ===== Running CPU only =====" << "\n\n\n";
+        sntfd.callNTF<planc::NTFANLSBPP, planc::ALTOTensor<LIType>>(pc);
+        break;
+      case PARTIAL:
+        INFO << "\n\n ===== Running partial GPU =====" << "\n\n\n";
+        sntfd.callNTF<planc::NTFANLSBPP, planc::BLCOTensor<LIType>>(pc);
+        break;
+      case FULL:
+        INFO << "\n\n ===== Running full GPU =====" << "\n\n\n";
+        sntfd.callNTF<planc::NTFANLSBPP_GPU, planc::BLCOTensor<LIType>>(pc);
+        break;
+      }
       break;
     case AOADMM:
-      sntfd.callNTF<planc::NTFAOADMM, planc::ALTOTensor<LIType>>(pc);
-      break;
-    // Leave out NESTEROV for now since it requires a bit of refactoring --
+      switch (pc.gpu_type())
+      {
+      case CPU_ONLY:
+        INFO << "\n\n ===== Running CPU only =====" << "\n\n\n";
+        sntfd.callNTF<planc::NTFAOADMM, planc::ALTOTensor<LIType>>(pc);
+        break;
+      case PARTIAL:
+        INFO << "\n\n ===== Running partial GPU =====" << "\n\n\n";
+        sntfd.callNTF<planc::NTFAOADMM, planc::BLCOTensor<LIType>>(pc);
+        break;
+      case FULL:
+        INFO << "\n\n ===== Running full GPU =====" << "\n\n\n";
+        sntfd.callNTF<planc::NTFAOADMM_GPU, planc::BLCOTensor<LIType>>(pc);
+        break;
+      }
+      break;    // Leave out NESTEROV for now since it requires a bit of refactoring --
     // it computes the objective error using the lowranktensor which
     // we don't explicitly use at all in the Sparse TF case...
     // case NESTEROV:
