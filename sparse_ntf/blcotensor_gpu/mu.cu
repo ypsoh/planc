@@ -66,7 +66,7 @@ void mu_update(MAT_GPU * fm, MAT_GPU * o_mttkrp_gpu, const MAT_GPU * gram) {
     "malloc mttkrp_t matrix"
   );
 
-  value_fill(d_temp, m * n, EPSILON);
+  value_dfill(d_temp, m * n, EPSILON);
   check_cuda(cudaDeviceSynchronize(), "value fill -- epsilon");
 
   mat_mat_mul(fm->vals, gram->vals, d_temp, m, n, k, 1.0, 1.0);
@@ -75,7 +75,9 @@ void mu_update(MAT_GPU * fm, MAT_GPU * o_mttkrp_gpu, const MAT_GPU * gram) {
   int num_elements = m * k;
   int num_blocks = (num_elements + TILE_SIZE - 1) / TILE_SIZE;
 
-  transpose_mat<<<num_blocks, TILE_SIZE>>>(d_mttkrp_t, o_mttkrp_gpu->vals, k, m);
+  // REFACTOR -> can use cublas geam
+  __mat_transpose<<<num_blocks, TILE_SIZE>>>(d_mttkrp_t, o_mttkrp_gpu->vals, k, m);
+  
   check_cuda(cudaDeviceSynchronize(), "sync after normaliztation");
   // check_cuda(cudaMemcpy(o_mttkrp_gpu->vals, d_mttkrp_t, m * k * sizeof(double), cudaMemcpyDeviceToDevice), "copy o_mttkrp_t to o_mttkrp");
 

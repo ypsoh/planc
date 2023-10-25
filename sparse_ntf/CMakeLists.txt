@@ -51,6 +51,10 @@ blcotensor_gpu/blco.cu
 blcotensor_gpu/cuda_utils.cu
 blcotensor_gpu/mu.cu
 blcotensor_gpu/hals.cu
+blcotensor_gpu/aoadmm.cu
+blcotensor_gpu/anlsbpp.cu
+blcotensor_gpu/matrix_ops.cu
+blcotensor_gpu/vector_ops.cu
 ) 
 
 set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -std=c++17 -O3 -gencode=arch=compute_80,code=sm_80")
@@ -61,6 +65,9 @@ sparse_ntf.cpp
 add_executable(profiling
 profiling.cpp
 )
+
+set_target_properties(profiling PROPERTIES COMPILE_FLAGS "-fPIE" LINK_FLAGS "-fPIE")
+
 
 add_library(blco_gpu ${CUDA_SOURCES})
 
@@ -78,7 +85,7 @@ target_include_directories(blco_gpu PRIVATE ${NTF_SOURCE_DIR}/blcotensor_gpu/inc
 
 # Optionally, link any other necessary libraries
 # target_link_libraries(blco_gpu PRIVATE ${CUDA_LIBRARIES} ${NTFLIB_LIBS}) // blco_gpu needs armadillo lib??
-target_link_libraries(blco_gpu PRIVATE ${CUDA_LIBRARIES})
+target_link_libraries(blco_gpu PRIVATE ${CUDA_LIBRARIES} -lcusolver)
 target_link_libraries(sparse_ntf ${NTFLIB_LIBS} ${NMFLIB_LIBS} blco_gpu)
 target_link_libraries(profiling ${NTFLIB_LIBS} ${NMFLIB_LIBS} blco_gpu)
 

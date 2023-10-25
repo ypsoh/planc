@@ -78,8 +78,9 @@ class AUNTF_GPU {
       gram_mat_gpu = send_mat_to_gpu(gram_mat_host);
       lambda_gpu = make_device_copy(factors_host.lambda().memptr(), i_k, "lambda_gpu");
 
-      m_compute_error = false;
-      m_num_it = 20;
+      // For performance evaluation
+      // m_compute_error = false;
+      // m_num_it = 20;
 
   }
 
@@ -100,15 +101,17 @@ class AUNTF_GPU {
   }
 
   void computeSparseNTF() {
+    double wtime;
     for (m_current_it = 0; m_current_it < m_num_it; ++m_current_it) {
       INFO << "iter::" << this->m_current_it << std::endl;
       for (int j = 0; j < this->m_input_tensor.modes(); ++j) {
+        wtime = omp_get_wtime();
         gram_leave_out_one_gpu(j, factors_host.modes(), factors_gpu, gram_mat_gpu);
-       
         m_input_tensor.mttkrp_gpu(j, factors_gpu, mttkrp_mat_gpu[j]);
 
         // update kernel
         update_gpu(j, gram_mat_gpu, factors_gpu, mttkrp_mat_gpu[j]);
+
         // factors_gpu[j] is updated, update lambda_gpu accordingly
         normalize_fm(factors_gpu[j], lambda_gpu);
         // debug
@@ -117,12 +120,13 @@ class AUNTF_GPU {
         // INFO << factors_host.m_lambda << std::endl;
         // exit(0);               
         // update_factor_mode_gpu(j, factors_gpu);
+        printf("[PERF-mode + gram + mttkrp + update + update_fm]\t%d\t%f\n", j, omp_get_wtime() - wtime);
       }
       if (m_compute_error) {
         // compute mttkrp for last mode
         int last_mode = this->m_input_tensor.modes() - 1;
         send_mat_to_host(mttkrp_mat_gpu[last_mode], &mttkrp_mat_host[last_mode]);
-        INFO << arma::norm(mttkrp_mat_host[last_mode], "fro") << std::endl;
+        // INFO << arma::norm(mttkrp_mat_host[last_mode], "fro") << std::endl;
         for (int m = 0; m < this->m_input_tensor.modes(); ++m) {
           send_mat_to_host(factors_gpu[m], &factors_host.factor(m));
         }

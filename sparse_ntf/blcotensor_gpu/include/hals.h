@@ -6,6 +6,7 @@
 #include "cuda_runtime.h"
 #include "cuda_utils.h"
 #include "blco.h"
+#include "vector_ops.h"
 #include <iostream>
 
 void hals_update(MAT_GPU * fm, MAT_GPU * o_mttkrp_gpu, const MAT_GPU * gram);

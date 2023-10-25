@@ -63,7 +63,7 @@ MAT_GPU * send_mat_to_gpu(MAT * mat) {
   int num_elements = mat->n_rows * mat->n_cols;
   MAT_GPU * _mat = new MAT_GPU(mat->n_rows, mat->n_cols);
   
-  check_cuda(cudaMalloc(&_mat->vals, sizeof(double) * num_elements), "cudaMalloc mat to gpu");
+  check_cuda(cudaMalloc((void**)&_mat->vals, sizeof(double) * num_elements), "cudaMalloc mat to gpu");
   check_cuda(cudaMemcpy(_mat->vals, mat->memptr(), sizeof(double) * num_elements, cudaMemcpyHostToDevice), "cudaMemcpy mat to gpu");
   cudaDeviceSynchronize(); // Wait for the data transfer to complete
 
@@ -81,6 +81,11 @@ MAT_GPU ** send_mats_to_gpu(MAT * mats, int num_modes) {
 void send_mat_to_host(MAT_GPU * o_mat_gpu, MAT * o_mat_host) {
   int num_elements = o_mat_host->n_rows * o_mat_host->n_cols;
   check_cuda(cudaMemcpy(o_mat_host->memptr(), o_mat_gpu->vals, sizeof(_FType) * num_elements, cudaMemcpyDeviceToHost), "cudaMemcpy mat to host");
+}
+
+void send_umat_to_host(UMAT_GPU * o_mat_gpu, arma::Mat<unsigned int> * o_mat_host) {
+  int num_elements = o_mat_host->n_rows * o_mat_host->n_cols;
+  check_cuda(cudaMemcpy(o_mat_host->memptr(), o_mat_gpu->vals, sizeof(unsigned int) * num_elements, cudaMemcpyDeviceToHost), "cudaMemcpy umat to host");
 }
 
 
@@ -575,7 +580,7 @@ __global__ void mttkrp_lvl1_4d_kernel(
       _IType d2 = dimensions[2]; // z
       _IType d3 = dimensions[3]; // w
 
-      _IType target_mode_dim = dimensions[tmode];
+      // _IType target_mode_dim = dimensions[tmode];
 
       for (_IType i = tid; i < rank; i += block.size()) {
         // Register-based accumlation
@@ -625,7 +630,7 @@ void gram_leave_out_one_gpu(int mode, int num_modes, MAT_GPU ** factors, MAT_GPU
   // Init gram matrix to ones
   double * temp;
   check_cuda(cudaMalloc((void**)&temp, sizeof(double) * gram_m * gram_n), "cudaMalloc temp matrix for gram mat");
-  value_fill(gram->vals, gram_m * gram_n, 1.0);
+  value_dfill(gram->vals, gram_m * gram_n, 1.0);
   check_cuda(cudaDeviceSynchronize(), "value fill");
 
   cublasHandle_t handle;

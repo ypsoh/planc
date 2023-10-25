@@ -11,13 +11,9 @@
 #include "common/utils.h"
 // #include <cooperative_groups.h>
 // #include <chrono>
-#define _IType unsigned long long
-#define _FType double
-
-#define STASH_SIZE 4
-#define INVALID_ID	((_IType) -1)
 
 struct MAT_GPU; // declared in cuda_utils.h
+struct UMAT_GPU; 
 
 struct BLCOBlock {
   int m_modes;
@@ -72,6 +68,8 @@ void send_blco_block_gpu_async(BLCOBlock * blk_host, BLCOBlock * blk_dev, cudaSt
 void send_blco_to_gpu();
 
 void send_mat_to_host(MAT_GPU * o_mat_gpu, MAT * o_mat_host);
+void send_umat_to_host(UMAT_GPU * o_mat_gpu, arma::Mat<unsigned int> * o_mat_host); // for dev purposes (BPP algo)
+
 MAT_GPU * send_mat_to_gpu(MAT * mat);
 MAT_GPU ** send_mats_to_gpu(MAT * mats, int num_modes);
 void free_mats_on_gpu(MAT_GPU ** mats_gpu, int num_modes);
