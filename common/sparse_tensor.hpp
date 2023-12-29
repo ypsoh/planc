@@ -63,7 +63,7 @@ class SparseTensor {
 
       // first time reading tensor, traverse to end to 
       // 1. count number of modes 2. count nnzs
-      int _nnz = 0;
+      UWORD _nnz = 0;
       while (std::getline(ifs, line, '\n')) {
         if (nmodes == 0) {
           std::stringstream _line(line);
@@ -76,6 +76,7 @@ class SparseTensor {
         _nnz++;
       }
       m_numel = _nnz;
+      INFO << "num elements: " << m_numel << "\n";
 
       // set vector size to predetermined size
       this->m_indices.resize(this->m_modes);
@@ -164,6 +165,8 @@ class SparseTensor {
     /**
      * @brief Computes rel. error between input tensor X and kruskal model M
      * || X - M ||^2 / || X ||^2
+     * For sparse tensor formats, assumes mttkrp_mat is same dims as factor matrix
+     * This is different from dense TF
      * @param[in] factors NCPFactors - factor matrices
      * @return double the squared error in respect to input tensor
      */
@@ -177,7 +180,7 @@ class SparseTensor {
       #pragma omp parallel for schedule(static)
       for (int j = 0; j < rank; ++j) {
         for (int i = 0; i < last_mode_dim; ++i) {
-          accum[j] += factors.factor(mode)(i, j) * i_mttkrp_mat(j, i);
+          accum[j] += factors.factor(mode)(i, j) * i_mttkrp_mat(i, j);
         }
       }
       for (int i = 0; i < rank; ++i) {

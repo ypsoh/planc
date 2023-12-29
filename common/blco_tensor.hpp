@@ -252,6 +252,14 @@ namespace planc {
         this->m_partition_ptr.shrink_to_fit();
       }
 
+      ~BLCOTensor() {
+        // Clean up BLCOTensor
+        free(this->m_blco_indices);
+        free(this->m_blco_values);
+        free(this->m_blco_mode_pos);
+        free(this->m_blco_mode_mask);
+      }
+
       // mttkrp_gpu is a mttkrp kernel that assumes everything is in GPU
       void mttkrp_gpu(const int target_mode, MAT_GPU ** i_factors_gpu, MAT_GPU *o_mttkrp_gpu) const {
         // Do mttkrp_gpu for BLCO Tensor
@@ -309,6 +317,7 @@ namespace planc {
         }
         check_cuda(cudaDeviceSynchronize(), "mttkrp complete");
       }
+
       // mttkrp kernel, unlike mttkrp_gpu kernel
       // assumes only the mttkrp operation being offloaded to the GPU
       // and does all the memcpy operations before and after
