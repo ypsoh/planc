@@ -56,9 +56,19 @@ __global__ void dvec_scale_kernel(const double * vi, double * vo, double factor,
 void dvec_add(const double * v1, const double * v2, double * v3, size_t size) {
   dvec_add_kernel<<<size / BLOCK_SIZE + 1, BLOCK_SIZE>>>(v1, v2, v3, size);
 }
+
+void dvec_add_async(cudaStream_t stream, const double * v1, const double * v2, double * v3, size_t size) {
+  dvec_add_kernel<<<size / BLOCK_SIZE + 1, BLOCK_SIZE, 0, stream>>>(v1, v2, v3, size);
+
+}
 void dvec_sub(const double * v1, const double * v2, double * v3, size_t size) {
   dvec_sub_kernel<<<size / BLOCK_SIZE + 1, BLOCK_SIZE>>>(v1, v2, v3, size);
 }
+
+void dvec_sub_async(const double * v1, const double * v2, double * v3, size_t size, cudaStream_t stream) {
+  dvec_sub_kernel<<<size / BLOCK_SIZE + 1, BLOCK_SIZE, 0, stream>>>(v1, v2, v3, size);
+}
+
 void dvec_mult(const double * v1, const double * v2, double * v3, size_t size) {
   dvec_mult_kernel<<<size / BLOCK_SIZE + 1, BLOCK_SIZE>>>(v1, v2, v3, size);
 }

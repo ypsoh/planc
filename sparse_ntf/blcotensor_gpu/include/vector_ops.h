@@ -23,7 +23,10 @@ void ivec_mult(const int * v1, const int * v2, int * v3, size_t size);
 void ivec_scale(const int * v1, const int * v2, int * v3, size_t size);
 
 void dvec_add(const double * v1, const double * v2, double * v3, size_t size);
+void dvec_add_async(cudaStream_t stream, const double * v1, const double * v2, double * v3, size_t size);
+
 void dvec_sub(const double * v1, const double  * v2, double * v3, size_t size);
+void dvec_sub_async(const double * v1, const double * v2, double * v3, size_t size, cudaStream_t stream);
 void dvec_mult(const double * v1, const double * v2, double * v3, size_t size);
 void dvec_scale(const double * v1, const double * v2, double * v3, size_t size);
 

@@ -249,6 +249,87 @@ void normalize_fm(MAT_GPU * fm, double * lambda) {
   check_cuda(cudaDeviceSynchronize(), "sync after normaliztation");
 }
 
+void normalize_mat_cublas(int m, int n, double * mat_vals, double * lambda) {
+  double * d_norms = (double*) calloc(n, sizeof(double));
+  // 1/d_norms
+  double * rec_d_norms = (double*) malloc(n * sizeof(double));
+  cudaStream_t streams[n];
+  cublasHandle_t handles[n];
+
+  for (int r = 0; r < n; ++r) {
+    check_cuda(cudaStreamCreate(&streams[r]), "cudaStreamCreate");
+    check_cublas(cublasCreate(&handles[r]), "cublasCreate");
+    check_cublas(cublasSetStream(handles[r], streams[r]), "cublasSetStream");
+  }
+  for (int r = 0; r < n; ++r) {
+    // double lambda = 0.0;
+
+    check_cublas(cublasDnrm2(handles[r], m, mat_vals + r*m, 1, &d_norms[r]), "cublas Dnrm2 -- compute norm");
+    // cudaMemcpyAsync(&rec_d_norms[r], &d_norms[r], sizeof(double), cudaMemcpyDeviceToHost, streams[r]);
+    rec_d_norms[r] = fabs(d_norms[r]) > 1e-12 ? 1 / d_norms[r] : 0;
+    check_cublas(cublasDscal(handles[r], m, &rec_d_norms[r], mat_vals+r*m, 1), "cublas Dscal -- divide entries by lambda"); 
+  }
+  for (int r = 0; r < n; ++r) {
+    check_cuda(cudaStreamSynchronize(streams[r]), "cudaStream sync");
+    check_cublas(cublasDestroy(handles[r]), "cublas handle destroy");
+    check_cuda(cudaStreamDestroy(streams[r]), "cudaStream destroy");
+  }
+
+  // check_cuda(cudaMemcpy(lambda, d_norms, sizeof(double) * n, cudaMemcpyDeviceToDevice), "cudaMemcpy -- lambda to host");
+  check_cuda(cudaDeviceSynchronize(), "normalize fm complete");
+  check_cuda(cudaMemcpy(lambda, d_norms, sizeof(double) * n, cudaMemcpyHostToDevice), "memcpy");
+
+  free(rec_d_norms);
+  free(d_norms);
+}
+
+void normalize_fm_cublas(MAT_GPU * fm, double * lambda) {
+  int rank = fm->n_cols;
+  int dim = fm->n_rows;
+  // Array to store norms for each columns
+  
+  // double * d_norms;
+  // check_cuda(cudaMalloc((void**)&d_norms, rank * sizeof(double)), "cudaMalloc d_norm");
+  // check_cuda(cudaMemset(d_norms, 0, rank * sizeof(double)), "cudaMemset d_norm to zero");
+
+  double * d_norms = (double*) calloc(rank, sizeof(double));
+  // 1/d_norms
+  double * rec_d_norms = (double*) malloc(rank * sizeof(double));
+
+  cudaStream_t streams[rank];
+  cublasHandle_t handles[rank];
+
+  for (int r = 0; r < rank; ++r) {
+    check_cuda(cudaStreamCreate(&streams[r]), "cudaStreamCreate");
+    check_cublas(cublasCreate(&handles[r]), "cublasCreate");
+    check_cublas(cublasSetStream(handles[r], streams[r]), "cublasSetStream");
+  }
+  for (int r = 0; r < rank; ++r) {
+    // double lambda = 0.0;
+
+    check_cublas(cublasDnrm2(handles[r], dim, fm->vals + r*dim, 1, &d_norms[r]), "cublas Dnrm2 -- compute norm");
+    // cudaMemcpyAsync(&rec_d_norms[r], &d_norms[r], sizeof(double), cudaMemcpyDeviceToHost, streams[r]);
+    rec_d_norms[r] = fabs(d_norms[r]) > 1e-12 ? 1 / d_norms[r] : 0;
+
+    check_cublas(cublasDscal(handles[r], dim, &rec_d_norms[r], fm->vals+r*dim, 1), "cublas Dscal -- divide entries by lambda"); 
+
+  }
+  for (int r = 0; r < rank; ++r) {
+    check_cuda(cudaStreamSynchronize(streams[r]), "cudaStream sync");
+    check_cublas(cublasDestroy(handles[r]), "cublas handle destroy");
+    check_cuda(cudaStreamDestroy(streams[r]), "cudaStream destroy");
+  }
+
+  // check_cuda(cudaMemcpy(lambda, d_norms, sizeof(double) * rank, cudaMemcpyDeviceToDevice), "cudaMemcpy -- lambda to host");
+  check_cuda(cudaDeviceSynchronize(), "normalize fm complete");
+
+  check_cuda(cudaMemcpy(lambda, d_norms, sizeof(double) * rank, cudaMemcpyHostToDevice), "memcpy");
+
+
+  free(rec_d_norms);
+  free(d_norms);
+}
+
 void mat_mat_mul(_FType* a, _FType* b, _FType* c, int m, int n, int k, double alpha, double beta) {
   cublasHandle_t handle;
   check_cublas(cublasCreate(&handle), "create cublas handle");
@@ -272,9 +353,23 @@ __global__ void __apply_threshold(double* v, int n, const double th, const doubl
   }
 }
 
+__global__ void __apply_nonnegative_projection_kernel(double* v, double * diff, int n) {
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  if (idx < n) {
+    double val = v[idx];
+    v[idx] = (val >= 0) * val;
+    diff[idx] = (val < 0) * val;
+  }
+}
+
+void apply_nonnegative_projection(double * v, double * diff, int n) {
+  __apply_nonnegative_projection_kernel<<<(n + BLOCK_SIZE - 1)/BLOCK_SIZE, BLOCK_SIZE, 0, 0>>>(v, diff, n);
+}
+
 MAT_GPU * init_mat_gpu(int m, int n) {
   MAT_GPU * _mat = new MAT_GPU(m, n);
   check_cuda(cudaMalloc((void**)&_mat->vals, sizeof(_FType) * m * n), "cudaMalloc init_mat_gpu");
+  check_cuda(cudaMemset(_mat->vals, 0, sizeof(_FType) * m * n), "cudaMemset init_mat_gpu");
   return _mat;
 }
 
@@ -476,6 +571,30 @@ void mat_cholesky_solve_gpu(const MAT_GPU * A, MAT_GPU * B, bool is_lower) {
 }
 
 template <typename T> 
+__global__ void reduce_sum_col_gpu(const T * v, T * sum_vector, int rows, int cols) {
+  extern __shared__ T _sdata[];
+  
+  // Each block processes one column at a time
+  unsigned int col = blockIdx.x;
+  unsigned int tid = threadIdx.x;
+  unsigned int i = blockIdx.x * rows + tid; // the element within the column blockIdx.x
+  // int tid = blockDim.x * blockIdx.x + tid;
+  _sdata[tid] = (tid < rows) ? v[i] : 0;
+  __syncthreads();
+
+  // Perform reduction in shared memory
+  for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {
+      if (tid < s) {
+          _sdata[tid] += _sdata[tid + s];
+      }
+      __syncthreads();
+  }
+
+  // Write result for this block to global mem
+  if (tid == 0) sum_vector[col] += _sdata[0];
+}
+
+template <typename T> 
 __global__ void reduce_sum_gpu(const T * v, int size, T * sum) {
   extern __shared__ double sdata[];
   int tid = blockDim.x * blockIdx.x + threadIdx.x;
@@ -585,17 +704,23 @@ UMAT_GPU UMAT_GPU::operator%(const UMAT_GPU & other) const {
   return bool_mat;
 }
 // sum along columns
+// threads per block is usually less than R used for TF
+// So we are not considering cases where rank exceeds threadsPerBlock
 UVEC_GPU UMAT_GPU::sum() const {
   int m = this->n_rows;
   int n = this->n_cols;
 
   // sum along columns only
   UVEC_GPU sum_vec = UVEC_GPU(n);
-  int num_tblocks = (m + BLOCK_SIZE - 1) / BLOCK_SIZE;
-  int shared_mem = sizeof(unsigned int) * BLOCK_SIZE;
-  for (int i = 0; i < n; ++i) {
-    reduce_sum_gpu<unsigned int><<<num_tblocks, BLOCK_SIZE, shared_mem>>>(this->vals + i * m, m, &sum_vec.vals[i]);
-  }
+  // int num_tblocks = (m + BLOCK_SIZE - 1) / BLOCK_SIZE;
+  // int shared_mem = sizeof(unsigned int) * BLOCK_SIZE;
+  // for (int i = 0; i < n; ++i) {
+  //   reduce_sum_gpu<unsigned int><<<num_tblocks, BLOCK_SIZE, shared_mem>>>(this->vals + i * m, m, &sum_vec.vals[i]);
+  // }
+  const int threadsPerBlock = 256;
+  const int blocks = this->n_cols;
+  int sharedMemSize = threadsPerBlock * sizeof(unsigned int);
+  reduce_sum_col_gpu<unsigned int><<<blocks, threadsPerBlock, sharedMemSize>>>(this->vals, sum_vec.vals, m, n);
   check_cuda(cudaDeviceSynchronize(), "reduce sum for all columns in UMAT_GPU");
 
   return sum_vec;

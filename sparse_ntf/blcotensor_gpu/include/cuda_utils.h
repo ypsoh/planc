@@ -38,6 +38,8 @@ void check_cublas(cublasStatus_t status, std::string message);
 void check_cusolver(cusolverStatus_t status, std::string message);
 
 __global__ void __apply_threshold(double* v, int n, const double th, const double repl);
+void apply_nonnegative_projection(double * v, double * diff, int n);
+__global__ void __apply_nonnegative_projection_kernel(double* v, double * diff, int n);
 
 enum COMPARE_OP {
   GREATER,
@@ -267,6 +269,11 @@ struct UMAT_GPU {
 struct MAT_GPU {
   int n_rows;
   int n_cols;
+
+  // Kind of hacky -- not always defined..
+  // Can we use stream[0] as default?
+  // if stream is NULL by default it will use 0-th stream
+  cudaStream_t stream = NULL;
   
   double * vals;
   // constructor
@@ -275,6 +282,13 @@ struct MAT_GPU {
     // if not explicitly set as zero, there are scenarios where the a new object carrys-on values from
     // "free"-ed old objects -- found out the hard way
     check_cuda(cudaMemset(vals, 0, sizeof(double) * r * c), "cudaMemset MAT_GPU");
+  }
+
+  MAT_GPU(int r, int c, cudaStream_t stream) : n_rows(r), n_cols(c), stream(stream) {
+    check_cuda(cudaMallocAsync((void**)&vals, sizeof(double) * r * c, stream), "cudaMallocAsync MAT_GPU");
+    // if not explicitly set as zero, there are scenarios where the a new object carrys-on values from
+    // "free"-ed old objects -- found out the hard way
+    check_cuda(cudaMemsetAsync(vals, 0, sizeof(double) * r * c, stream), "cudaMemsetAsync MAT_GPU");
   }
 
   MAT_GPU(): n_rows(0), n_cols(0) {}
@@ -387,7 +401,12 @@ struct MAT_GPU {
     return bool_mat;
   }
   ~MAT_GPU() {
-    check_cuda(cudaFree(vals), "cudaFree destructor for MAT_GPU");
+    if (stream == NULL) {
+      check_cuda(cudaFree(vals), "cudaFree destructor for MAT_GPU");
+    } 
+    else {
+      check_cuda(cudaFreeAsync(vals, stream), "cudaFreeAsync destructor for MAT_GPU");  
+    }
   }
 };
 
@@ -404,6 +423,8 @@ __global__ void hadamard_kernel(_FType* x, _FType* y, int n);
 void vector_hadamard(_FType* x, _FType* y, int n);
 
 void normalize_fm(MAT_GPU * fm, _FType * lambda);
+void normalize_fm_cublas(MAT_GPU * fm, _FType * lambda);
+void normalize_mat_cublas(int m, int n, double * mat_vals, double * lambda);
 
 void mat_mat_mul(_FType* a, _FType* b, _FType* c, int m, int n, int k, double alpha = 1.0, double beta = 0.0);
 void mat_vec_mul(_FType* a, _FType* b, _FType* c, int m, int n, double alpha = 1.0, double beta = 0.0);

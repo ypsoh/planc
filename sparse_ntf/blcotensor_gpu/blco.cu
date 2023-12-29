@@ -580,7 +580,7 @@ __global__ void mttkrp_lvl1_4d_kernel(
       _IType d2 = dimensions[2]; // z
       _IType d3 = dimensions[3]; // w
 
-      // _IType target_mode_dim = dimensions[tmode];
+      _IType target_mode_dim = dimensions[tmode];
 
       for (_IType i = tid; i < rank; i += block.size()) {
         // Register-based accumlation
@@ -594,11 +594,13 @@ __global__ void mttkrp_lvl1_4d_kernel(
           z = nnz_idx[n * 4 + 2];
           w = nnz_idx[n * 4 + 3];
           
+          
           // if (tmode == 0) val *= f1[rank * y + i] * f2[rank * z + i] * f3[rank * w + i];
           // else if (tmode == 1) val *= f0[rank * x + i] * f2[rank * z + i] * f3[rank * w + i];
           // else if (tmode == 2) val *= f0[rank * x + i] * f1[rank * y + i] * f3[rank * w + i];                 
           // else val *= f0[rank * x + i] * f1[rank * y + i] * f2[rank * z + i];
 
+          // f1, f2, .. are stored in column major format (I x R)
           if (tmode == 0) val *= f1[d1 * i + y] * f2[d2 * i + z] * f3[d3 * i + w];
           else if (tmode == 1) val *= f0[d0 * i + x] * f2[d2 * i + z] * f3[d3 * i + w];
           else if (tmode == 2) val *= f0[d0 * i + x] * f1[d1 * i + y] * f3[d3 * i + w];                 
@@ -607,8 +609,12 @@ __global__ void mttkrp_lvl1_4d_kernel(
           value += val;
           ++n;
         } while (n < block.size() && !(sg_mask & (1<<n)));
-        atomicAdd(output + output_row * rank + i, value);
-        // atomicAdd(output + target_mode_dim * i + output_row, value);
+
+        // row-major R x I
+        // atomicAdd(output + output_row * rank + i, value);
+
+        // column major I x R
+        atomicAdd(output + target_mode_dim * i + output_row, value);
       } // rank
       // broadcast n
       // if (curr_elem == 0) {
