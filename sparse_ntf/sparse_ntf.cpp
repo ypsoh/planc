@@ -65,7 +65,7 @@ int main(int argc, char* argv[]) {
   planc::SparseNTFDriver sntfd;
 
   //======== hard coded
-  cudaError_t cudaStatus = cudaSetDevice(1);
+  cudaError_t cudaStatus = cudaSetDevice(0);
   if (cudaStatus != cudaSuccess) {
     std::cerr << "cudaSetDevice failed! Error: " << cudaGetErrorString(cudaStatus) << std::endl;
     return 1;

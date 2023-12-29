@@ -64,7 +64,7 @@ void anlsbpp_update(MAT_GPU * fm, MAT_GPU * o_mttkrp_gpu, const MAT_GPU * gram) 
   UVEC_GPU NotOptCols = NotGood > 0;
 
   unsigned int numNonOptCols = NotOptCols.sum();
-  INFO << "numNonOptCols: " << NotOptCols.sum() << std::endl;
+  // INFO << "numNonOptCols: " << NotOptCols.sum() << std::endl;
 
   unsigned int MAX_ITERATIONS = nrhs * 5;
   // unsigned int MAX_ITERATIONS = 3;
@@ -186,7 +186,7 @@ void anlsbpp_update(MAT_GPU * fm, MAT_GPU * o_mttkrp_gpu, const MAT_GPU * gram) 
 
     NotOptCols = NotGood > 0;
     numNonOptCols = NotOptCols.sum();
-    printf("numNonOptCols.sum(): %d\n", numNonOptCols);
+    // printf("numNonOptCols.sum(): %d\n", numNonOptCols);
   } // End of BPP iteration
 
   free_mat_gpu(Y);

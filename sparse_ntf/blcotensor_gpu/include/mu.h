@@ -9,4 +9,5 @@
 #include <iostream>
 
 void mu_update(MAT_GPU * fm, MAT_GPU * o_mttkrp_gpu, const MAT_GPU * gram);
+void mu_update_opt(MAT_GPU * fm, MAT_GPU * o_mttkrp_gpu, const MAT_GPU * gram);
 #endif // MU_GPU_H_

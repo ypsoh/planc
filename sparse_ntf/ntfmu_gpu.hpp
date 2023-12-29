@@ -9,7 +9,8 @@ template <class T>
 class NTFMU_GPU : public AUNTF_GPU <T> {
   protected:
     void update_gpu(const int mode, const MAT_GPU * gram, MAT_GPU ** factors, MAT_GPU * o_mttkrp) {
-      mu_update(factors[mode], o_mttkrp, gram);
+      // mu_update(factors[mode], o_mttkrp, gram);
+      mu_update_opt(factors[mode], o_mttkrp, gram);
     }
 
   public:

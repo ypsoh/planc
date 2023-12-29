@@ -8,46 +8,54 @@ __global__ void update_fm(double * h, double * o_mttkrp_vals, double * temp, int
   }
 }
 
-/* 4x3
-0: (0, 0) 4: (0, 1) 8: (0, 2) 
-1: (1, 0) 5: (1, 1) 9: (1, 2) 
-2: (2, 0) 6: (2, 1) 10: (2, 2) 
-3: (3, 0) 7: (3, 1) 11: (3, 2) 
+__global__ void update_fm_opt(double * h, double * o_mttkrp_vals, double * temp, double epsilon, size_t size) {
+  int idx = threadIdx.x + blockIdx.x * blockDim.x;
+  if (idx < size) {
+    h[idx] = h[idx] * o_mttkrp_vals[idx] / (temp[idx] + epsilon);
+  }
+}
+
+/**
+ * Optimized implementation of MU update
+ * Simply reduce redundant kernel calls and memory operations
+ * Non-blocked version.. might need blocked version if STF breaks for R > 128? 
 */
-// 12
-/*
-0: (0, 0) 3: (0, 1) 6: (0, 2) 9: (0, 3)
-1: (1, 0) 4: (1, 1) 7: (1, 2) 10: (1, 3)
-2: (2, 0) 5: (2, 1) 8: (2, 2) 11: (2, 3)
-*/
+void mu_update_opt(MAT_GPU * fm, MAT_GPU * o_mttkrp_gpu, const MAT_GPU * gram) {
+  int m = fm->n_rows;
+  int n = gram->n_cols;
+  int k = fm->n_cols;
 
-// 0 -> 0 - 0 * 3 + 0
-// 1 -> 3 - 1 * 3 + 0
-// 2 -> 6 - 2 * 3 + 0
-// 3 -> 9 - 3 * 3 + 0
+  double * d_temp;
+  cudaStream_t stream1;
 
-// 4 -> 1 - 0 * 3 + 1
-// 5 -> 4 - 1 * 3 + 1
-// 6 -> 7 - 2 * 3 + 1
-// 7 -> 10 - 3 * 3 + 1
+  cudaStreamCreate(&stream1); // mat mul 
 
-// 8 -> 2 - 0 * 3 + 2
-// 9 -> 5
-// 10 -> 8
-// 11 -> 11 - 3 * 3 + 2
+  check_cuda(
+    cudaMallocAsync((void**)&d_temp, m * n * sizeof(double), stream1), "malloc result matrix");
 
-// 0 -> 0 -
-// 1 -> 4 - (idx % n)* m + idx / n
-// 2 -> 8
+    // d_temp = H * gram + EPSILON
+    cublasHandle_t handle1;
+    cublasCreate(&handle1);
 
-// 3 -> 1
-// 4 -> 5
-// 5 -> 9 
+    cublasSetStream(handle1, stream1);
 
-// 6 -> 2 
-// 7 -> 6
-// 8 -> 10
+    double alpha = 1.0;
+    double beta = 0.0;
 
+    // double * dummy
+    // temp = H * gram
+    // temp = H * gram
+    check_cublas(cublasDgemm(handle1, CUBLAS_OP_N, CUBLAS_OP_N, m, k, n, &alpha, fm->vals, m, gram->vals, n, &beta, d_temp, m), "H * this->gram_without_one");
+
+    int num_elements = m * k;
+    int num_blocks = (num_elements + TILE_SIZE - 1) / TILE_SIZE;
+
+    update_fm_opt<<<num_blocks, TILE_SIZE, 0, stream1>>>(fm->vals, o_mttkrp_gpu->vals, d_temp, EPSILON, m * k);
+    cudaStreamSynchronize(stream1);
+    cudaFreeAsync(d_temp, stream1);
+    cublasDestroy(handle1);
+    cudaStreamDestroy(stream1);
+}
 
 void mu_update(MAT_GPU * fm, MAT_GPU * o_mttkrp_gpu, const MAT_GPU * gram) {
   // need matrix multiplicatin -- fm * gram
@@ -69,19 +77,19 @@ void mu_update(MAT_GPU * fm, MAT_GPU * o_mttkrp_gpu, const MAT_GPU * gram) {
   value_dfill(d_temp, m * n, EPSILON);
   check_cuda(cudaDeviceSynchronize(), "value fill -- epsilon");
 
-  mat_mat_mul(fm->vals, gram->vals, d_temp, m, n, k, 1.0, 1.0);
+  mat_mat_mul(fm->vals, gram->vals, d_temp, m, n, k, 1.0, 1.0); // H * gram + EPSILON
 
   // Update factor matrix
   int num_elements = m * k;
   int num_blocks = (num_elements + TILE_SIZE - 1) / TILE_SIZE;
 
   // REFACTOR -> can use cublas geam
-  __mat_transpose<<<num_blocks, TILE_SIZE>>>(d_mttkrp_t, o_mttkrp_gpu->vals, k, m);
+  // __mat_transpose<<<num_blocks, TILE_SIZE>>>(d_mttkrp_t, o_mttkrp_gpu->vals, k, m); // 
   
   check_cuda(cudaDeviceSynchronize(), "sync after normaliztation");
   // check_cuda(cudaMemcpy(o_mttkrp_gpu->vals, d_mttkrp_t, m * k * sizeof(double), cudaMemcpyDeviceToDevice), "copy o_mttkrp_t to o_mttkrp");
 
-  update_fm<<<num_blocks, TILE_SIZE>>>(fm->vals, d_mttkrp_t, d_temp, num_elements);
+  update_fm<<<num_blocks, TILE_SIZE>>>(fm->vals, o_mttkrp_gpu->vals, d_temp, num_elements);
   cudaFree(d_temp);
   cudaFree(d_mttkrp_t);
 }

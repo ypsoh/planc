@@ -11,17 +11,24 @@ class NTFAOADMM_GPU : public AUNTF_GPU <T> {
   private:
     MAT_GPU** aux_factors_gpu;
     int admm_iter;
+    int nmodes;
     double tolerance;
 
   protected:
-    void update_gpu(const int mode, const MAT_GPU * gram, MAT_GPU ** factors, MAT_GPU * o_mttkrp) {
-      aoadmm_update(factors[mode], aux_factors_gpu[mode], o_mttkrp, gram, admm_iter, tolerance);
-      // exit(0);
-    }
 
+    void update_gpu(const int mode, const MAT_GPU * gram, MAT_GPU ** factors, MAT_GPU * o_mttkrp) {
+
+      // aoadmm_update(factors[mode], aux_factors_gpu[mode], o_mttkrp, gram, admm_iter, tolerance);
+      
+      // calculate block size and num streams
+      int block_size = factors[mode]->n_rows; // default is num of cols for factor matrix
+      int num_streams = 1;
+      // blocked and optimized admm update
+      aoadmm_blocked_update(factors[mode], aux_factors_gpu[mode], o_mttkrp, gram, block_size, admm_iter, tolerance, num_streams);
+    }
   public:
     NTFAOADMM_GPU(const T &i_tensor, const int i_k, algotype i_algo)
-      : AUNTF_GPU<T>(i_tensor, i_k, i_algo) {
+      : AUNTF_GPU<T>(i_tensor, i_k, i_algo), nmodes(i_tensor.modes()) {
         // set up dual variable that only exists in GPU
         aux_factors_gpu = new MAT_GPU*[i_k];
 
@@ -34,6 +41,15 @@ class NTFAOADMM_GPU : public AUNTF_GPU <T> {
         admm_iter = 5;
         tolerance = 0.01;
       }
+
+    ~NTFAOADMM_GPU() {
+      // Release resources for each element in aux_factors_gpu
+      for (int m = 0; m < nmodes; ++m) {
+        free_mat_gpu(aux_factors_gpu[m]);
+      }
+      // Delete the array itself
+      delete[] aux_factors_gpu;
+  }
 };  // class NTFAOADMM_GPU
 }  // namespace planc
 

@@ -56,7 +56,7 @@ class AUNTF_GPU {
       // mttkrp_mat_host = new MAT(i_k, longest_mode); // already transposed
       mttkrp_mat_host = new MAT[i_tensor.modes()]; // already transposed
       for (int m = 0; m < factors_host.modes(); ++m) {
-        mttkrp_mat_host[m].zeros(i_k, TENSOR_DIM[m]);
+        mttkrp_mat_host[m].zeros(TENSOR_DIM[m], i_k);
         size_t mttkrp_size = mttkrp_mat_host[m].n_cols * mttkrp_mat_host[m].n_rows * sizeof(double);
         check_cuda(cudaHostRegister(mttkrp_mat_host[m].memptr(), mttkrp_size, cudaHostRegisterDefault), "pin mttkrp_mat_host memory on host");
       }
@@ -102,25 +102,40 @@ class AUNTF_GPU {
 
   void computeSparseNTF() {
     double wtime;
+    double wtime_gram;
+    double wtime_mttkrp;
+    double wtime_update;
+    double wtime_update_fm;
+
     for (m_current_it = 0; m_current_it < m_num_it; ++m_current_it) {
       INFO << "iter::" << this->m_current_it << std::endl;
       for (int j = 0; j < this->m_input_tensor.modes(); ++j) {
         wtime = omp_get_wtime();
         gram_leave_out_one_gpu(j, factors_host.modes(), factors_gpu, gram_mat_gpu);
+        wtime_gram = omp_get_wtime() - wtime;
+
+        wtime = omp_get_wtime();
         m_input_tensor.mttkrp_gpu(j, factors_gpu, mttkrp_mat_gpu[j]);
+        wtime_mttkrp = omp_get_wtime() - wtime;
 
         // update kernel
+
+        wtime = omp_get_wtime();
         update_gpu(j, gram_mat_gpu, factors_gpu, mttkrp_mat_gpu[j]);
+        wtime_update = omp_get_wtime() - wtime;
 
         // factors_gpu[j] is updated, update lambda_gpu accordingly
-        normalize_fm(factors_gpu[j], lambda_gpu);
+        wtime = omp_get_wtime();
+        // normalize_fm(factors_gpu[j], lambda_gpu);
+        normalize_fm_cublas(factors_gpu[j], lambda_gpu);
+        wtime_update_fm = omp_get_wtime() - wtime;
         // debug
         // int rank = factors_gpu[0]->n_cols;
         // cudaMemcpy(factors_host.m_lambda.memptr(), lambda_gpu, sizeof(double) * rank, cudaMemcpyDeviceToHost);
         // INFO << factors_host.m_lambda << std::endl;
         // exit(0);               
         // update_factor_mode_gpu(j, factors_gpu);
-        printf("[PERF-mode + gram + mttkrp + update + update_fm]\t%d\t%f\n", j, omp_get_wtime() - wtime);
+        printf("[PERF-mode, gram, mttkrp, update, update_fm]\t%d\t%f\t%f\t%f\t%f\n", j, wtime_gram, wtime_mttkrp, wtime_update, wtime_update_fm);
       }
       if (m_compute_error) {
         // compute mttkrp for last mode

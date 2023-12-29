@@ -18,14 +18,9 @@ void hals_update(MAT_GPU * fm, MAT_GPU * o_mttkrp_gpu, const MAT_GPU * gram) {
   check_cuda(
     cudaMalloc((void**)&fm_times_gram_col, m * sizeof(_FType)), "cudaMalloc fm_times_gram_col"
   );
-  // transpose o_mttkrp_gpu to access rows
-  check_cuda(
-    cudaMalloc((void**)&mttkrp_t, m * n * sizeof(_FType)), "cudaMalloc mttkrp_t"
-  );
 
   int num_elements = m * n;
   int num_blocks = (num_elements + BLOCK_SIZE - 1 )/ BLOCK_SIZE;
-  __mat_transpose<<<num_blocks, BLOCK_SIZE>>>(mttkrp_t, o_mttkrp_gpu->vals, n, m);
 
   int rank = n;
   for (int r = 0; r < rank; ++r) {
@@ -36,7 +31,7 @@ void hals_update(MAT_GPU * fm, MAT_GPU * o_mttkrp_gpu, const MAT_GPU * gram) {
     num_elements = m;
     num_blocks = (num_elements + BLOCK_SIZE - 1) / BLOCK_SIZE;
     dvec_sub(fm->vals+col_idx, fm_times_gram_col, fm->vals+col_idx, m);
-    dvec_add(fm->vals+col_idx, mttkrp_t+col_idx, fm->vals+col_idx, m);
+    dvec_add(fm->vals+col_idx, o_mttkrp_gpu->vals+col_idx, fm->vals+col_idx, m);
     __apply_threshold<<<num_blocks, BLOCK_SIZE>>>(fm->vals+col_idx, m, 1e-16, 1e-16);
   }
 
