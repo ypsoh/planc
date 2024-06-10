@@ -2,7 +2,6 @@
 
 void hals_update(MAT_GPU * fm, MAT_GPU * o_mttkrp_gpu, const MAT_GPU * gram) {
   _FType *fm_times_gram_col;
-  _FType *mttkrp_t; // temp for transpose mttkrp
 
   int m = fm->n_rows;
   int n = fm->n_cols;
@@ -36,5 +35,4 @@ void hals_update(MAT_GPU * fm, MAT_GPU * o_mttkrp_gpu, const MAT_GPU * gram) {
   }
 
   cudaFree(fm_times_gram_col);
-  cudaFree(mttkrp_t);
 }

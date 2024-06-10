@@ -38,8 +38,8 @@ void check_cublas(cublasStatus_t status, std::string message);
 void check_cusolver(cusolverStatus_t status, std::string message);
 
 __global__ void __apply_threshold(double* v, int n, const double th, const double repl);
-void apply_nonnegative_projection(double * v, double * diff, int n);
-__global__ void __apply_nonnegative_projection_kernel(double* v, double * diff, int n);
+void apply_nonnegative_projection(double * v, int n);
+__global__ void __apply_nonnegative_projection_kernel(double* v, int n);
 
 enum COMPARE_OP {
   GREATER,
@@ -242,6 +242,8 @@ struct UMAT_GPU {
    * fills the matrix accordingly
   */
   void idx_based_fill(const UMAT_GPU& ind_mat, const unsigned int val) {
+    // printf("%d %d\n", ind_mat.n_rows, this->n_rows);
+    // printf("%d %d\n", ind_mat.n_cols, this->n_cols);
     assert(ind_mat.n_rows == this->n_rows);
     assert(ind_mat.n_cols == this->n_cols);
     value_ufill_idx_based(this->vals, ind_mat.vals, n_rows * n_cols, val);

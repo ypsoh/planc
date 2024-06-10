@@ -1,11 +1,12 @@
 #include "anlsbpp.h"
 #include "vector_ops.h"
 #include "matrix_ops.h"
+#include "cholesky_helpers.h"
 
-#define CHUNK_SIZE 100
 #define UUMAT arma::Mat<uint32_t>
 #define UUVEC arma::Row<uint32_t>
 #define DEBUG 0
+#define BATCHED_SOLVE 1
 /**
  * @brief Computes the NLS-BPP update AX=B where X has non-negativity constraint
  * 
@@ -13,6 +14,21 @@
  * where gram is A, o_mttkrp_gpu is B and final product of X is copied to fm
 */
 void anlsbpp_update(MAT_GPU * fm, MAT_GPU * o_mttkrp_gpu, const MAT_GPU * gram) {
+  cudaEvent_t start;
+  cudaEvent_t stop;
+
+  cudaEventCreate(&start);
+  cudaEventCreate(&stop);
+
+  float milliseconds = 0;
+  float t_matops = 0;
+  float t_init_partition = 0;
+  float t_update_partition = 0;
+  float t_batched_cholesky = 0;
+
+
+  cudaEventRecord(start);
+
   MAT_GPU * Y = init_mat_gpu(o_mttkrp_gpu->n_rows, o_mttkrp_gpu->n_cols);
 
   MAT_GPU * X = new MAT_GPU(); // Create an empty shell
@@ -28,6 +44,12 @@ void anlsbpp_update(MAT_GPU * fm, MAT_GPU * o_mttkrp_gpu, const MAT_GPU * gram) 
   unsigned int k = nrhs; // rank
   unsigned int n = RANK;
 
+#if BATCHED_SOLVE == 1
+  MAT_GPU * L = init_mat_gpu(n, n);
+  copy_mat_gpu(L, gram);
+  mat_cholesky_gpu(L); // perform cholesky decomp to gram    
+#endif
+
   mat_mat_mul(gram->vals, X->vals, Y->vals, gram->n_rows, gram->n_cols, X->n_cols, 1.0, 0.0);
 
   cublasHandle_t handle;
@@ -42,6 +64,11 @@ void anlsbpp_update(MAT_GPU * fm, MAT_GPU * o_mttkrp_gpu, const MAT_GPU * gram) 
 
   cublasDestroy(handle);
 
+  cudaEventRecord(stop);
+  cudaEventSynchronize(stop);
+  cudaEventElapsedTime(&t_matops, start, stop);
+
+  cudaEventRecord(start);
   UMAT_GPU PassiveSet = *X > 0;
   UMAT_GPU LO = * Y < 0;
   UMAT_GPU RO = PassiveSet == 0;
@@ -64,10 +91,10 @@ void anlsbpp_update(MAT_GPU * fm, MAT_GPU * o_mttkrp_gpu, const MAT_GPU * gram) 
   UVEC_GPU NotOptCols = NotGood > 0;
 
   unsigned int numNonOptCols = NotOptCols.sum();
-  // INFO << "numNonOptCols: " << NotOptCols.sum() << std::endl;
+  INFO << "before it even runs numNonOptCols: " << NotOptCols.sum() << std::endl;
 
-  unsigned int MAX_ITERATIONS = nrhs * 5;
-  // unsigned int MAX_ITERATIONS = 3;
+  // unsigned int MAX_ITERATIONS = nrhs * 5;
+  unsigned int MAX_ITERATIONS = 1;
   bool success = true;
 
   UVEC_GPU Cols1 = UVEC_GPU(k);
@@ -77,12 +104,16 @@ void anlsbpp_update(MAT_GPU * fm, MAT_GPU * o_mttkrp_gpu, const MAT_GPU * gram) 
   UMAT_GPU PSetBits = NonOptSet;
   UMAT_GPU POffBits = InfeaSet;
 
+  cudaEventRecord(stop);
+  cudaEventSynchronize(stop);
+  cudaEventElapsedTime(&t_init_partition, start, stop);
   // For debugging
 
   UUVEC debug_uvec = arma::zeros<UUVEC>(X->n_cols);
-
+  UUMAT debug_umat = arma::zeros<UUMAT>(X->n_rows, X->n_cols);
   unsigned int iter = 0;
   while(numNonOptCols > 0) {
+    cudaEventRecord(start);
     iter++;
     if ((MAX_ITERATIONS > 0) && (iter > MAX_ITERATIONS)) {
       success = false;
@@ -120,8 +151,18 @@ void anlsbpp_update(MAT_GPU * fm, MAT_GPU * o_mttkrp_gpu, const MAT_GPU * gram) 
     if (!Cols3.empty()) {
       INFO << "Cols3 not empty" << "\n";
     }
+    
     // It should only try to solve Ax=b for columns that have nonOptCols
     cudaMemcpy(debug_uvec.memptr(), NotOptCols.vals, sizeof(uint32_t) * NotGood.size, cudaMemcpyDeviceToHost);
+    MAT debug_X = arma::zeros<MAT>(n, nrhs);
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+    cudaEventElapsedTime(&t_update_partition, start, stop);
+#if BATCHED_SOLVE == 0
+    // cudaMemcpy(debug_X.memptr(), o_mttkrp_gpu->vals, sizeof(double) * nrhs * n, cudaMemcpyDeviceToHost);
+    // INFO << debug_X << "\n";
+    // exit(1);
+
     for (int col_idx = 0; col_idx < nrhs; ++col_idx) {
       if (debug_uvec[col_idx] == 1) {
         MAT_GPU MASKED_A = gram->apply_mask(PassiveSet.vals + col_idx * RANK);
@@ -157,7 +198,56 @@ void anlsbpp_update(MAT_GPU * fm, MAT_GPU * o_mttkrp_gpu, const MAT_GPU * gram) 
         // Update Y here
       }
     } // Update this->X complete
+    // cudaMemcpy(debug_X.memptr(), X->vals, sizeof(double) * nrhs * n, cudaMemcpyDeviceToHost);
+    // INFO << debug_X << "\n";
+#else
+    // cudaMemcpy(debug_X.memptr(), o_mttkrp_gpu->vals, sizeof(double) * nrhs * n, cudaMemcpyDeviceToHost);
+    // INFO << debug_X << "\n";
+    // exit(1);
+    // for debugging
+    // MAT debug_mat_ = arma::zeros<MAT>(n, n * nrhs);
 
+
+    cudaEventRecord(start);
+
+    // Create multiple copys of GRAM
+    double * batched_L; // we store nrhs * rank * rank number of L here to later use it for batched cholesky solve
+    check_cuda(cudaMallocAsync((void**)&batched_L, sizeof(double) * nrhs * n * n, 0), "memcpy batched L");
+
+    create_batch_sqmatrices(L->vals, batched_L, nrhs, n);
+
+    // cudaMemcpy(debug_mat_.memptr(), batched_L, sizeof(double) * n * n * nrhs, cudaMemcpyDeviceToHost);
+    // cudaMemcpy(debug_umat.memptr(), PassiveSet.vals, sizeof(uint32_t) * n * nrhs, cudaMemcpyDeviceToHost);
+
+    cudaDeviceSynchronize();
+    // INFO << debug_mat_.cols(0, 20) << "\n\n\n";
+    // INFO << debug_umat << "\n\n\n";
+
+    apply_mask_to_batch_sqmatrices(batched_L, n, nrhs, PassiveSet.vals);
+
+    // cudaMemcpy(debug_mat_.memptr(), batched_L, sizeof(double) * n * n * nrhs, cudaMemcpyDeviceToHost);
+    cudaDeviceSynchronize();
+
+    // copy o_mttkrp_gpu to X
+    idxBasedCopy(X->vals, o_mttkrp_gpu->vals, PassiveSet.vals, n, nrhs);
+
+
+    cusolverBatchedCholesky(batched_L, X->vals, n, nrhs);
+    cudaDeviceSynchronize();
+
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+    cudaEventElapsedTime(&t_batched_cholesky, start, stop);
+
+    // INFO << debug_mat_.cols(0, 40) << "\n\n\n";
+    // cudaMemcpy(debug_X.memptr(), X->vals, sizeof(double) * nrhs * n, cudaMemcpyDeviceToHost);
+    // INFO << debug_X << "\n";
+
+    // Solve a batch of cholesky equations
+    // exit(1);
+
+#endif
+    cudaEventRecord(start);
     mat_mat_mul(gram->vals, X->vals, Y->vals, gram->n_rows, gram->n_cols, X->n_cols, 1.0, 0.0);
 
     cublasHandle_t handle2;
@@ -175,7 +265,13 @@ void anlsbpp_update(MAT_GPU * fm, MAT_GPU * o_mttkrp_gpu, const MAT_GPU * gram) 
     // Update Y all at once
     fixAbsNumericalError_gpu(X->vals, 1e-12, 0.0, X->n_cols * X->n_rows);
     fixAbsNumericalError_gpu(Y->vals, 1e-12, 0.0, Y->n_cols * Y->n_rows);
-    
+
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+    cudaEventElapsedTime(&milliseconds, start, stop);
+    t_matops += milliseconds;
+
+    cudaEventRecord(start);    
     NonOptSet = (*Y < 0) % (PassiveSet == 0);
     InfeaSet = (*X < 0) % PassiveSet;
 
@@ -186,10 +282,19 @@ void anlsbpp_update(MAT_GPU * fm, MAT_GPU * o_mttkrp_gpu, const MAT_GPU * gram) 
 
     NotOptCols = NotGood > 0;
     numNonOptCols = NotOptCols.sum();
-    // printf("numNonOptCols.sum(): %d\n", numNonOptCols);
+    printf("numNonOptCols.sum(): %d\n", numNonOptCols);
+ 
+    cudaEventRecord(stop);
+    cudaEventSynchronize(stop);
+    cudaEventElapsedTime(&milliseconds, start, stop);
+    t_update_partition += milliseconds;
   } // End of BPP iteration
 
+  printf("matops,init_part,update_part,b_chol,%f,%f,%f,%f\n", t_matops, t_init_partition, t_update_partition, t_batched_cholesky);
   free_mat_gpu(Y);
+#if BATCHED_SOLVE == 1
+  free_mat_gpu(L);
+#endif
 }
 
 /* PLACEHOLDER IMPLEMENTATION TO TEST API CALLS 

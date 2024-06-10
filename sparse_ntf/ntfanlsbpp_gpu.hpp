@@ -5,7 +5,8 @@
 #include "cuda_utils.h"
 #include "anlsbpp.h"
 
-#define CHUNK_SIZE 2000
+#define CHUNK_SIZE 1000000
+// #define USE_CHUNK
 
 namespace planc {
 template <class T>
@@ -16,27 +17,34 @@ class NTFANLSBPP_GPU : public AUNTF_GPU <T> {
     double tolerance;
 
   protected:
-    void update_gpu(const int mode, const MAT_GPU * gram, MAT_GPU ** factors, MAT_GPU * o_mttkrp) {
-      int nhrs = o_mttkrp->n_cols;
+    void update_gpu(const int mode, const MAT_GPU * gram, MAT_GPU * factors, MAT_GPU * o_mttkrp) {
       // printf("fm size: %d %d\n", factors[mode]->n_rows, factors[mode]->n_cols);
 
-      mat_transpose_inplace(factors[mode]);
-      // printf("fm size: %d %d\n", factors[mode]->n_rows, factors[mode]->n_cols);
+      mat_transpose_inplace(factors);
+      mat_transpose_inplace(o_mttkrp); // I x R -> R x I
+      int nhrs = factors->n_cols;
+      printf("fm size: %d %d\n", factors->n_rows, factors->n_cols);
+      printf("mttkrp size: %d %d\n", o_mttkrp->n_rows, o_mttkrp->n_cols);
   
       int num_chunks = nhrs / CHUNK_SIZE;
       if (num_chunks * CHUNK_SIZE < nhrs) num_chunks++;
 
       // later might need to move it so that it can use cudaStreams
+#ifdef USE_CHUNK
       for (int i = 0; i < num_chunks; ++i) {
         // printf("i: %d\n", i);
         int col_start_idx = i * CHUNK_SIZE;
         int col_end_idx = (i + 1) * CHUNK_SIZE - 1;
         if (col_end_idx > nhrs - 1) col_end_idx = nhrs -1;
 
-        anlsbpp_update(factors[mode]->cols(col_start_idx, col_end_idx), o_mttkrp->cols(col_start_idx, col_end_idx), gram);
+        anlsbpp_update(factors->cols(col_start_idx, col_end_idx), o_mttkrp->cols(col_start_idx, col_end_idx), gram);
       }
+#else
+      anlsbpp_update(factors, o_mttkrp, gram);
+#endif
 
-      mat_transpose_inplace(factors[mode]);
+      mat_transpose_inplace(factors);
+      mat_transpose_inplace(o_mttkrp); // I x R -> R x I
       
       // exit(0);
     }

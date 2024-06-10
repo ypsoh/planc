@@ -26,11 +26,15 @@ class AUNTF_GPU {
 
     // GPU stuff
     MAT_GPU** factors_gpu;
+
     MAT_GPU** mttkrp_mat_gpu;
+    // MAT_GPU* mttkrp_mat_gpu; // only one matrix which we'll reuse for all modes
+    
     MAT_GPU* gram_mat_gpu;
     double* lambda_gpu;
-    virtual void update_gpu(const int mode, const MAT_GPU * gram, MAT_GPU ** factors, MAT_GPU * o_mttkrp) = 0;
 
+    virtual void update_gpu(const int mode, const MAT_GPU * gram, MAT_GPU * factors, MAT_GPU * o_mttkrp) = 0;
+  
   private:
     const T &m_input_tensor;
     int m_num_it;
@@ -60,6 +64,10 @@ class AUNTF_GPU {
         size_t mttkrp_size = mttkrp_mat_host[m].n_cols * mttkrp_mat_host[m].n_rows * sizeof(double);
         check_cuda(cudaHostRegister(mttkrp_mat_host[m].memptr(), mttkrp_size, cudaHostRegisterDefault), "pin mttkrp_mat_host memory on host");
       }
+      // mttkrp_mat_host = new MAT(longest_mode, i_k); // already transposed
+      // size_t mttkrp_size = mttkrp_mat_host->n_cols * mttkrp_mat_host->n_rows * sizeof(double);
+      // check_cuda(cudaHostRegister(mttkrp_mat_host->memptr(), mttkrp_size, cudaHostRegisterDefault), "pin mttkrp_mat_host memory on host");
+
       gram_mat_host = new MAT(i_k, i_k);
       size_t gram_size = i_k * i_k * sizeof(double);
 
@@ -74,6 +82,8 @@ class AUNTF_GPU {
       // pin host memory for cuda
       // get largets dim
       mttkrp_mat_gpu = send_mats_to_gpu(mttkrp_mat_host, factors_host.modes());
+      // mttkrp_mat_gpu = send_mat_to_gpu(mttkrp_mat_host);
+
       factors_gpu = send_mats_to_gpu(factors_host.factors(), factors_host.modes());
       gram_mat_gpu = send_mat_to_gpu(gram_mat_host);
       lambda_gpu = make_device_copy(factors_host.lambda().memptr(), i_k, "lambda_gpu");
@@ -81,7 +91,6 @@ class AUNTF_GPU {
       // For performance evaluation
       // m_compute_error = false;
       // m_num_it = 20;
-
   }
 
   ~AUNTF_GPU() {
@@ -89,6 +98,7 @@ class AUNTF_GPU {
       mttkrp_mat_host[i].clear();
     }
     delete[] mttkrp_mat_host;
+    // delete mttkrp_mat_host;
     // Clear cuda stuff too
   }
 
@@ -108,8 +118,10 @@ class AUNTF_GPU {
     double wtime_update_fm;
 
     for (m_current_it = 0; m_current_it < m_num_it; ++m_current_it) {
-      INFO << "iter::" << this->m_current_it << std::endl;
+      // INFO << "iter::" << this->m_current_it << std::endl;
       for (int j = 0; j < this->m_input_tensor.modes(); ++j) {
+
+
         wtime = omp_get_wtime();
         gram_leave_out_one_gpu(j, factors_host.modes(), factors_gpu, gram_mat_gpu);
         wtime_gram = omp_get_wtime() - wtime;
@@ -118,10 +130,18 @@ class AUNTF_GPU {
         m_input_tensor.mttkrp_gpu(j, factors_gpu, mttkrp_mat_gpu[j]);
         wtime_mttkrp = omp_get_wtime() - wtime;
 
-        // update kernel
+        // // free all non related factor matrices
+        // for (int m = 0; m < this->m_input_tensor.modes(); ++m) {
+        //   if (m != j) {
+        //     // send_mat_to_host(factors_gpu[m], &factors_host[m]);
+        //     cudaFree(factors_gpu[m]);
+        //   }
+        // }
 
+        // update kernel
         wtime = omp_get_wtime();
-        update_gpu(j, gram_mat_gpu, factors_gpu, mttkrp_mat_gpu[j]);
+        // update_gpu(j, gram_mat_gpu, factors_gpu[j], mttkrp_mat_gpu);
+        update_gpu(j, gram_mat_gpu, factors_gpu[j], mttkrp_mat_gpu[j]);
         wtime_update = omp_get_wtime() - wtime;
 
         // factors_gpu[j] is updated, update lambda_gpu accordingly
@@ -135,12 +155,17 @@ class AUNTF_GPU {
         // INFO << factors_host.m_lambda << std::endl;
         // exit(0);               
         // update_factor_mode_gpu(j, factors_gpu);
-        printf("[PERF-mode, gram, mttkrp, update, update_fm]\t%d\t%f\t%f\t%f\t%f\n", j, wtime_gram, wtime_mttkrp, wtime_update, wtime_update_fm);
+        // iter,gram,mttkrp,admm,0.283968,0.000068,0.015024,0.268874
+
+        // printf("[PERF-mode, gram, mttkrp, update, update_fm]\t%d\t%f\t%f\t%f\t%f\n", j, wtime_gram, wtime_mttkrp, wtime_update, wtime_update_fm);
+        printf("%d,%f,%f,%f,%f,%f\n", this->m_current_it, wtime_gram + wtime_mttkrp + wtime_update + wtime_update_fm, 
+          wtime_gram, wtime_mttkrp, wtime_update, wtime_update_fm);
       }
       if (m_compute_error) {
         // compute mttkrp for last mode
         int last_mode = this->m_input_tensor.modes() - 1;
         send_mat_to_host(mttkrp_mat_gpu[last_mode], &mttkrp_mat_host[last_mode]);
+        // send_mat_to_host(mttkrp_mat_gpu, mttkrp_mat_host);
         // INFO << arma::norm(mttkrp_mat_host[last_mode], "fro") << std::endl;
         for (int m = 0; m < this->m_input_tensor.modes(); ++m) {
           send_mat_to_host(factors_gpu[m], &factors_host.factor(m));
@@ -148,6 +173,7 @@ class AUNTF_GPU {
         int rank = factors_gpu[last_mode]->n_cols;
         cudaMemcpy(factors_host.m_lambda.memptr(), lambda_gpu, sizeof(double) * rank, cudaMemcpyDeviceToHost);
         // INFO << factors_host.m_lambda << std::endl;
+        // double temp_err = m_input_tensor.err(factors_host, *mttkrp_mat_host, last_mode);
         double temp_err = m_input_tensor.err(factors_host, mttkrp_mat_host[last_mode], last_mode);
         this->m_rel_error = temp_err;
         INFO << "relative_error @it " << this->m_current_it

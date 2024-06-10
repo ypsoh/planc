@@ -22,7 +22,14 @@ void admm_gpu_kernel(
   double * admm_condition_vals, 
   int stream_id,
   cudaStream_t stream);
+
+/**
+ * the "unoptimized" implementation of aoadmm
+ * uses triangular solve and does not take advantage of intermediate computations
+*/
 void aoadmm_update(MAT_GPU * fm, MAT_GPU * aux_fm, MAT_GPU * o_mttkrp_gpu, const MAT_GPU * gram, int admm_iter, double tolerance);
+
+
 void aoadmm_blocked_update(MAT_GPU * fm, MAT_GPU * aux_fm, MAT_GPU * o_mttkrp_gpu, const MAT_GPU * gram, int block_size, int admm_iter, double tolerance, int num_streams);
 
 void compute_t_H(cudaStream_t stream, double * t_fm_vals, double * mttkrp_vals, double * fm_vals, double * dual_vals, double rho, size_t n);

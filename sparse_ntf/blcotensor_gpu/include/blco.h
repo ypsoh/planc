@@ -78,7 +78,9 @@ void set_mat_to_zero(MAT_GPU * mat);
 __global__ void initializeMatrix(double* vals, int size);
 
 void mttkrp_lvl1(BLCOBlock * blco_block, MAT_GPU * o_mttkrp_gpu, MAT_GPU ** i_factors_gpu, int target_mode, int rank, _IType* dimensions, cudaStream_t stream);
-__global__ void mttkrp_lvl1_3d_kernel();
+__global__ void mttkrp_lvl1_3d_kernel(const _IType* __restrict__ lidx, double * vals, const _IType nnz, const _IType * block_coords, 
+                                        _FType* output, _FType* f0, _FType* f1, _FType* f2,
+                                        int target_mode, int rank, const _IType* dimensions);
 __global__ void mttkrp_lvl1_4d_kernel(const _IType* __restrict__ lidx, double * vals, const _IType nnz, const _IType * block_coords, 
                                         _FType* output, _FType* f0, _FType* f1, _FType* f2, _FType* f3,
                                         int target_mode, int rank, const _IType* dimensions);

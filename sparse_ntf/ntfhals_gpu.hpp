@@ -8,8 +8,8 @@ namespace planc {
 template <class T>
 class NTFHALS_GPU : public AUNTF_GPU <T> {
   protected:
-    void update_gpu(const int mode, const MAT_GPU * gram, MAT_GPU ** factors, MAT_GPU * o_mttkrp) {
-      hals_update(factors[mode], o_mttkrp, gram);
+    void update_gpu(const int mode, const MAT_GPU * gram, MAT_GPU * factors, MAT_GPU * o_mttkrp) {
+      hals_update(factors, o_mttkrp, gram);
     }
 
   public:

@@ -78,15 +78,15 @@ int main(int argc, char* argv[]) {
       switch (pc.gpu_type())
       {
       case CPU_ONLY:
-        INFO << "\n\n ===== Running CPU only =====" << "\n\n\n";
-        sntfd.callNTF<planc::NTFMU, planc::ALTOTensor<LIType>>(pc);
+        INFO << "\n\n ===== Running COO CPU =====" << "\n\n\n";
+        sntfd.callNTF<planc::NTFMU, planc::SparseTensor>(pc);
         break;
       case PARTIAL:
-        INFO << "\n\n ===== Running partial GPU =====" << "\n\n\n";
-        sntfd.callNTF<planc::NTFMU, planc::BLCOTensor<LIType>>(pc);
+        INFO << "\n\n ===== Running ALTO CPU =====" << "\n\n\n";
+        sntfd.callNTF<planc::NTFMU, planc::ALTOTensor<LIType>>(pc);
         break;
       case FULL:
-        INFO << "\n\n ===== Running full GPU =====" << "\n\n\n";
+        INFO << "\n\n ===== Running BLCO GPU =====" << "\n\n\n";
         sntfd.callNTF<planc::NTFMU_GPU, planc::BLCOTensor<LIType>>(pc);
         break;
       }
@@ -95,12 +95,12 @@ int main(int argc, char* argv[]) {
       switch (pc.gpu_type())
       {
       case CPU_ONLY:
-        INFO << "\n\n ===== Running CPU only =====" << "\n\n\n";
-        sntfd.callNTF<planc::NTFHALS, planc::ALTOTensor<LIType>>(pc);
+        INFO << "\n\n ===== Running COO CPU =====" << "\n\n\n";
+        sntfd.callNTF<planc::NTFHALS, planc::SparseTensor>(pc);
         break;
       case PARTIAL:
-        INFO << "\n\n ===== Running partial GPU =====" << "\n\n\n";
-        sntfd.callNTF<planc::NTFHALS, planc::BLCOTensor<LIType>>(pc);
+        INFO << "\n\n ===== Running ALTO CPU =====" << "\n\n\n";
+        sntfd.callNTF<planc::NTFHALS, planc::ALTOTensor<LIType>>(pc);
         break;
       case FULL:
         INFO << "\n\n ===== Running full GPU =====" << "\n\n\n";
@@ -112,12 +112,12 @@ int main(int argc, char* argv[]) {
       switch (pc.gpu_type())
       {
       case CPU_ONLY:
-        INFO << "\n\n ===== Running CPU only =====" << "\n\n\n";
-        sntfd.callNTF<planc::NTFANLSBPP, planc::ALTOTensor<LIType>>(pc);
+        INFO << "\n\n ===== Running COO CPU =====" << "\n\n\n";
+        sntfd.callNTF<planc::NTFANLSBPP, planc::SparseTensor>(pc);
         break;
       case PARTIAL:
-        INFO << "\n\n ===== Running partial GPU =====" << "\n\n\n";
-        sntfd.callNTF<planc::NTFANLSBPP, planc::BLCOTensor<LIType>>(pc);
+        INFO << "\n\n ===== Running ALTO CPU =====" << "\n\n\n";
+        sntfd.callNTF<planc::NTFANLSBPP, planc::ALTOTensor<LIType>>(pc);
         break;
       case FULL:
         INFO << "\n\n ===== Running full GPU =====" << "\n\n\n";
@@ -129,12 +129,12 @@ int main(int argc, char* argv[]) {
       switch (pc.gpu_type())
       {
       case CPU_ONLY:
-        INFO << "\n\n ===== Running CPU only =====" << "\n\n\n";
-        sntfd.callNTF<planc::NTFAOADMM, planc::ALTOTensor<LIType>>(pc);
+        INFO << "\n\n ===== Running COO CPU =====" << "\n\n\n";
+        sntfd.callNTF<planc::NTFAOADMM, planc::SparseTensor>(pc);
         break;
       case PARTIAL:
-        INFO << "\n\n ===== Running partial GPU =====" << "\n\n\n";
-        sntfd.callNTF<planc::NTFAOADMM, planc::BLCOTensor<LIType>>(pc);
+        INFO << "\n\n ===== Running ALTO CPU =====" << "\n\n\n";
+        sntfd.callNTF<planc::NTFAOADMM, planc::ALTOTensor<LIType>>(pc);
         break;
       case FULL:
         INFO << "\n\n ===== Running full GPU =====" << "\n\n\n";

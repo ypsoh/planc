@@ -55,9 +55,11 @@ blcotensor_gpu/aoadmm.cu
 blcotensor_gpu/anlsbpp.cu
 blcotensor_gpu/matrix_ops.cu
 blcotensor_gpu/vector_ops.cu
+blcotensor_gpu/cublas_operations.cu
 ) 
 
-set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -std=c++17 -O3 -gencode=arch=compute_80,code=sm_80")
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -std=c++17 -O3 -gencode=arch=compute_80,code=sm_80 --default-stream per-thread")
+message(STATUS "CMAKE_CUDA_FLAGS           = ${CMAKE_CUDA_FLAGS}"          )
 
 add_executable(sparse_ntf
 sparse_ntf.cpp

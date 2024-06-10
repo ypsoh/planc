@@ -202,7 +202,10 @@ void mttkrp_lvl1(BLCOBlock * b_block, MAT_GPU * o_mttkrp_gpu, MAT_GPU ** i_facto
   cudaEventRecord(start_event, 0);
   
   if (b_block->m_modes == 3) {
-    mttkrp_lvl1_3d_kernel<<<blocks, nnz_block, smem_sz>>>();
+    mttkrp_lvl1_3d_kernel<<<blocks, nnz_block, smem_sz, stream>>>(
+      b_block->idx, b_block->vals, b_block->m_numel, b_block->block_coords, 
+      o_mttkrp_gpu->vals, i_factors_gpu[0]->vals, i_factors_gpu[1]->vals, i_factors_gpu[2]->vals,
+      target_mode, rank, dimensions);
   } else if (b_block->m_modes == 4) {
     mttkrp_lvl1_4d_kernel<<<blocks, nnz_block, smem_sz, stream>>>(
       b_block->idx, b_block->vals, b_block->m_numel, b_block->block_coords, 
@@ -442,14 +445,159 @@ __global__ void mttkrp_lvl2_4d_kernel(
   }
 }
 
-__global__ void mttkrp_lvl1_3d_kernel() {
+__global__ void mttkrp_lvl1_3d_kernel(
+  const _IType* __restrict__ lidx, double * vals,
+  const _IType nnz, 
+  const _IType * block_coords,
+  _FType* output, _FType* f0, _FType* f1, _FType* f2,
+  const int tmode, const int rank, const _IType* dimensions) {
   auto block = cg::this_thread_block();
   auto tile = cg::tiled_partition<TILE_SIZE>(block);
   const int tid = block.thread_rank();
 
-  printf("tid: %d\n", tid);
-
   // set up caches (stash)
+  extern __shared__ int count[]; // [block.size()] 
+  _IType *nnz_idx = (_IType*) (count + block.size()); // nnz_idx for each thread
+  _IType *nnz_out = (_IType*) (nnz_idx + 3 * block.size()); // [block.size()] 
+  _FType* nnz_val = (_FType*) (nnz_out + block.size()); // [block.size()] 
+
+  // Identify block-level workload
+  _IType curr_elem = block.group_index().x * block.size(); // Index of start element
+  _IType end_elem = min(nnz, curr_elem + block.size()); // Index of last element
+
+  const int mp0 = POS[0];
+  const int mp1 = POS[1];
+  const int mp2 = POS[2];
+  const _IType mm0 = MASKS[0];
+  const _IType mm1 = MASKS[1];
+  const _IType mm2 = MASKS[2];
+  const _IType bc0 = block_coords[0];
+  const _IType bc1 = block_coords[1];
+  const _IType bc2 = block_coords[2];
+
+  while (curr_elem < end_elem) {
+    // Threads collaborate to perform On-the-fly delinerization, sorting, and segmented scan. 
+    count[tid] = 0;
+    _IType idx; // should be LIT
+    _IType x, y, z, output_row;
+    if (curr_elem + tid < end_elem) { // within each thread block
+      idx = lidx[curr_elem + tid]; // lidx for non-zero curr_elem + tid
+      
+      x = alt_pext(idx, mp0, mm0, bc0);
+      y = alt_pext(idx, mp1, mm1, bc1);
+      z = alt_pext(idx, mp2, mm2, bc2);
+      
+      if (tmode == 0) output_row = x;
+      else if (tmode == 1) output_row = y;
+      else output_row = z;
+    } else {
+      x = y = z = output_row = (_IType) - 1; // invalid value.. work is done
+    }
+    block.sync();
+
+    // Sorting nnzs based for hierarchical conflict resolution
+    int sg_mask = tile.match_any(output_row); // bitmask 1 for threads that have matching output_row in tile
+    auto sg = cg::labeled_partition(tile, sg_mask); // threads that have matching output_row
+    int sg_rank = sg.thread_rank(); // 
+    int sg_id = sg.meta_group_rank(); // rank of the cg within parent thread block
+    if (sg_rank == 0) count[sg_id+1] = sg.size(); // OOB writes will be overwritten later. counting sort histogram
+    
+    // count has size block.size()
+    // each element is initilized as 0 from count[tid] = 0
+    // sg_mask has 1 if current thread matches output_row
+    // sg is the partition based on sg_mask (same output_row value)
+    // sg_rank and sg_id retrieves the rank of the thread and the meta group respectively
+    // for only the master thread, update the count of the meta_group -- histogram
+    // so if first meta group has 3 matching to non-zeros
+    // count[0] = 0, count[1] = 3, 
+    // if second meta group has 2 matching to non-zeros???...
+    // count[2] = 2
+    block.sync();
+
+    // Scan for counting sort
+    sg_mask = count[tid];
+    //block.sync();
+    #pragma unroll
+    for (int j = 1; j < tile.size(); j <<= 1) { // tile size is 32, 2^^5
+    // value to be shuffled: sg_mask, distance it will be shuffled: j
+    // shuffles the value of sg_mask from a distance of j threads up the warp
+      int temp = tile.shfl_up(sg_mask, j);
+      // if thread is beyond the distance j from the start of the warp
+      // shuffled value is added to sg_mask...? why?
+      if (tid >= j) sg_mask += temp;
+    }
+    count[tid] = sg_mask;
+    block.sync();
+
+    // Sorted rank
+    sg_rank += count[sg_id];
+
+    // Strided access to facilitate broadcast later
+    nnz_idx[sg_rank * 3]  = x;
+    nnz_idx[sg_rank * 3 + 1]  = y;
+    nnz_idx[sg_rank * 3 + 2 ]  = z;
+    nnz_out[sg_rank] = output_row;
+    if (curr_elem+tid < end_elem) nnz_val[sg_rank] = vals[curr_elem+tid];
+    
+    // Segmented scan structure (reuse sg_mask).
+    if (sg.thread_rank() == 0) sg_mask = 1<<sg_rank;
+    else sg_mask = 0;
+
+    #pragma unroll
+    for (int j = tile.size()/2; j > 0; j >>= 1) {
+        sg_mask |= tile.shfl_down(sg_mask, j);
+    }
+    sg_mask = tile.shfl(sg_mask, 0);
+
+    // Now threads perform rank-wise operations.
+    int n = 0;
+    while (n < block.size() && (curr_elem + n) < end_elem) {
+      // block.sync();  
+      // Perform update
+      const _IType output_row = nnz_out[n];
+      const int next_n = n;
+
+      _IType d0 = dimensions[0]; // x
+      _IType d1 = dimensions[1]; // y 
+      _IType d2 = dimensions[2]; // z
+
+      _IType target_mode_dim = dimensions[tmode];
+
+      for (_IType i = tid; i < rank; i += block.size()) {
+        // Register-based accumlation
+        _FType value = 0.0;
+        n = next_n;
+        do {
+          // Broadcast 
+          _FType val = nnz_val[n];
+          x = nnz_idx[n * 3];
+          y = nnz_idx[n * 3 + 1];
+          z = nnz_idx[n * 3 + 2];
+
+          // f1, f2, .. are stored in column major format (I x R)
+          if (tmode == 0) val *= f1[d1 * i + y] * f2[d2 * i + z];
+          else if (tmode == 1) val *= f0[d0 * i + x] * f2[d2 * i + z];
+          else val *= f0[d0 * i + x] * f1[d1 * i + y];  
+          
+          value += val;
+          ++n;
+        } while (n < block.size() && !(sg_mask & (1<<n)));
+
+        // row-major R x I
+        // atomicAdd(output + output_row * rank + i, value);
+
+        // column major I x R
+        atomicAdd(output + target_mode_dim * i + output_row, value);
+      } // rank
+      // broadcast n
+      // if (curr_elem == 0) {
+      // // for (int m = 0; m < 4; ++m) {
+      //   printf("x:_ %llu, y:_ %llu, z:_ %llu, w:_ %llu\n", nnz_idx[n*4], nnz_idx[n*4+1], nnz_idx[n*4+2], nnz_idx[n*4+3]);
+      // }
+      n = tile.shfl(n, 0);
+    } // block.size()
+    curr_elem += block.size();
+  };
 };
 
 __global__ void mttkrp_lvl1_4d_kernel(

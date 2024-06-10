@@ -103,8 +103,10 @@ class AUNTF {
       this->m_stale_mttkrp.push_back(true);
     }
 
-    m_compute_error = false;
-    m_num_it = 20;
+    // For performance evaluation
+    // m_compute_error = false;
+    // m_num_it = 20;
+
     m_normA = i_tensor.norm();
     // INFO << "Init factors for NCP" << std::endl << "======================";
     // m_ncp_factors.print();
@@ -169,7 +171,7 @@ class AUNTF {
         update_factor_mode(j, factor.t());
         wtime_update_fm = omp_get_wtime() - wtime;
 
-        printf("[PERF-mode, gram, mttkrp, update, update_fm]\t%d\t%f\t%f\t%f\t%f\n", j, wtime_gram, wtime_mttkrp, wtime_update, wtime_update_fm);
+        printf("mode,iter,gram,mttkrp,update,update_fm,%d,%f,%f,%f,%f,%f\n", j, wtime_gram+wtime_mttkrp+wtime_update+wtime_update_fm, wtime_gram, wtime_mttkrp, wtime_update, wtime_update_fm);
       } // for all modes
 
       if (m_compute_error) {
@@ -177,7 +179,9 @@ class AUNTF {
         int last_mode = this->m_input_tensor.modes() - 1;
         m_input_tensor.mttkrp(last_mode, m_ncp_factors.factors(), &ncp_mttkrp_t[last_mode]);
 
-        double temp_err = m_input_tensor.err(m_ncp_factors, ncp_mttkrp_t[last_mode], last_mode);
+        // COO, ALTO mttkrp still operates over R x I mttkrp output
+        // So use the mttkrp.t() for correct error calculation
+        double temp_err = m_input_tensor.err(m_ncp_factors, ncp_mttkrp_t[last_mode].t(), last_mode);
         this->m_rel_error = temp_err;
         INFO << "relative_error @it " << this->m_current_it
             << "=" << temp_err << std::endl;
@@ -186,15 +190,24 @@ class AUNTF {
   }
 
   void computeNTF() {
+    double wtime;
+    double wtime_gram;
+    double wtime_mttkrp;
+    double wtime_update;
+    double wtime_update_fm;
+
     for (m_current_it = 0; m_current_it < m_num_it; m_current_it++) {
       INFO << "iter::" << this->m_current_it << std::endl;
       for (int j = 0; j < this->m_input_tensor.modes(); j++) {
+        wtime = omp_get_wtime();
         m_ncp_factors.gram_leave_out_one(j, &gram_without_one);
+        wtime_gram = omp_get_wtime() - wtime;
     #ifdef NTF_VERBOSE
         INFO << "gram_without_" << j << "::" << arma::cond(gram_without_one)
             << std::endl
             << gram_without_one << std::endl;
     #endif
+        wtime = omp_get_wtime();
         if (this->m_stale_mttkrp[j]) {
           m_ncp_factors.krp_leave_out_one(j, &ncp_krp[j]);
     #ifdef NTF_VERBOSE
@@ -214,13 +227,21 @@ class AUNTF {
               << ncp_mttkrp_t[j] << std::endl;
     #endif
         }
+        wtime_mttkrp = omp_get_wtime() - wtime;
+
         // MAT factor = update(m_updalgo, gram_without_one, ncp_mttkrp_t[j], j);
+        wtime = omp_get_wtime();
         MAT factor = update(j);
     #ifdef NTF_VERBOSE
         INFO << "iter::" << i << "::factor:: " << j << std::endl
             << factor << std::endl;
     #endif
+        wtime_update = omp_get_wtime() - wtime;
+
+        wtime = omp_get_wtime();
         update_factor_mode(j, factor.t());
+        wtime_update_fm = omp_get_wtime() - wtime;
+        // printf("mode,iter,gram,mttkrp,update,update_fm,%d,%f,%f,%f,%f,%f\n", j, wtime_gram+wtime_mttkrp+wtime_update+wtime_update_fm, wtime_gram, wtime_mttkrp, wtime_update, wtime_update_fm);
       }
       if (m_compute_error) {
         double temp_err = computeObjectiveError();

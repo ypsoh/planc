@@ -1,6 +1,11 @@
 #include "aoadmm.h"
 #include "cublas_operations.h"
 
+
+// FLAGS for ADMM optimization
+#define ENABLE_PI
+#define ENABLE_OF
+
 __global__ void __compute_t_H_kernel(double * t_fm_vals, double * mttkrp_vals,
   double * fm_vals, double * dual_vals, double rho, size_t n) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -66,35 +71,118 @@ void admm_gpu_kernel(
     bool stop_iter = false;
     double alpha, beta;
 
-    size_t _size = (end_row - start_row) * rank * sizeof(double);
     size_t num_rows = end_row - start_row;
+
+    // size of the current block size
+    size_t _size = num_rows * rank * sizeof(double);
    
     cublasHandle_t handle;
     check_cublas(cublasCreate(&handle), "create cublas handle");
-
     cublasSetStream(handle, stream);
 
-    cusolverDnHandle_t cusolver = NULL;
+#ifndef ENABLE_PI
+    cusolverDnHandle_t cusolver;
     cusolverDnCreate(&cusolver);
     cusolverDnSetStream(cusolver, stream);
+    cublasFillMode_t uplo = CUBLAS_FILL_MODE_LOWER;
+    int *devInfo;
+    cudaMalloc(&devInfo, sizeof(int));
+#endif
+
+    // allocate temp memory for transpose
+    // when is it needed?
+    // its needed when we're not using preinversion
+#ifndef ENABLE_OF
+    double * temp_fm_vals;
+    check_cuda(cudaMallocAsync(&temp_fm_vals, sizeof(double) * num_rows * rank, 0), "cudaMallocAsync temp_fm_vals");
+#endif
 
     // printf("Running admm_gpu_kernel, num_rows: %d\n", num_rows);
-    for (int i = 0; i < admm_iter && !stop_iter; ++i) {
+    for (int i = 0; i < 10; ++i) {
+    // for (int i = 0; i < admm_iter && !stop_iter; ++i) {
       // primal_vals is always up-to-date
       // this will write on original fm space
       check_cuda(cudaMemcpyAsync(prev_fac_vals, primal_vals, _size, cudaMemcpyDeviceToDevice, stream), "prev_fac <- primal_vals");
       alpha = 1.0; beta = 1.0;
 
+#ifdef ENABLE_OF
+      // tilde_primal_vals = mttkrp_vals + rho * (primal + dual)
       compute_t_H(stream, tilde_primal_vals, mttkrp_vals, primal_vals, dual_vals, rho, num_rows*rank);
+#else
+    check_cublas(cublasDgeam(handle, CUBLAS_OP_N, CUBLAS_OP_N, num_rows, rank, 
+      &alpha, primal_vals, num_rows, &beta, dual_vals, num_rows,
+      temp_fm_vals, num_rows), "temp = H + U");
+  
+    beta = rho; //rho
+    check_cublas(cublasDgeam(handle, CUBLAS_OP_N, CUBLAS_OP_N, num_rows, rank,
+      &alpha, mttkrp_vals, num_rows, &beta, temp_fm_vals, num_rows, 
+      temp_fm_vals, num_rows), "temp <- 1.0 * mttkrp + rho * temp");
 
+#ifdef ENABLE_PI
+    // do nothing
+    cudaMemset(tilde_primal_vals, 0, sizeof(double) * num_rows * rank);
+    cudaMemcpy(tilde_primal_vals, temp_fm_vals, sizeof(double) * num_rows * rank, cudaMemcpyDeviceToDevice);
+#else
+    beta = 0.0;
+    check_cublas(cublasDgeam(handle, CUBLAS_OP_T, CUBLAS_OP_N, rank, num_rows, 
+      &alpha, temp_fm_vals, num_rows, &beta, tilde_primal_vals, rank, 
+      tilde_primal_vals, rank), "tilde_primal_vals <- 1.0 * temp.T");
+#endif
+#endif
+
+#ifdef ENABLE_PI
       beta = 0.0; // tilde_primal_vals = gram_vals * tilde_primal_vals
-      check_cublas(cublasDgemm(handle, CUBLAS_OP_N, CUBLAS_OP_T,
+// #ifdef ENABLE_OF
+      check_cublas(cublasDgemm(handle, CUBLAS_OP_N, CUBLAS_OP_N,
         num_rows, rank, rank, &alpha, tilde_primal_vals,
         num_rows, gram_vals, rank, &beta, tilde_primal_vals, num_rows
       ), "dgemm solve using explicit inverse");
+// #else
+//       check_cublas(cublasDgemm(handle, CUBLAS_OP_T, CUBLAS_OP_N,
+//         num_rows, rank, rank, &alpha, tilde_primal_vals,
+//         rank, gram_vals, rank, &beta, tilde_primal_vals, rank
+//       ), "dgemm solve using explicit inverse");
+// #endif
+#else
+      check_cusolver(
+        cusolverDnDpotrs(cusolver, uplo, rank, 
+        num_rows, gram_vals, rank, tilde_primal_vals, rank, devInfo),
+        "cusolver cholesky solve"
+      ); // update H tilde
+#endif
 
+#ifdef ENABLE_OF
       compute_fm_with_projection(stream, primal_vals, tilde_primal_vals, dual_vals, num_rows * rank);
       compute_U(stream, dual_vals, primal_vals, tilde_primal_vals, num_rows * rank);
+      compute_diff_squared(stream, primal_vals, prev_fac_vals, tilde_primal_vals, num_rows * rank);
+#else
+      beta = -1.0;
+      check_cublas(cublasDgeam(handle, CUBLAS_OP_T, CUBLAS_OP_N, num_rows, rank, 
+        &alpha, tilde_primal_vals, rank, &beta, dual_vals, num_rows, 
+        primal_vals, num_rows), "primal_vals <- 1.0 * H tilde.T - 1.0 * dual_vals");
+
+      // cudaMemcpy(debug_mat1.memptr(), primal_vals, fm_size, cudaMemcpyDeviceToHost);
+      // INFO << debug_mat1 << "\n";
+      apply_nonnegative_projection(primal_vals, num_rows * rank);
+
+      beta = 1.0;
+      check_cublas(cublasDgeam(handle, CUBLAS_OP_N, CUBLAS_OP_N, num_rows, rank, 
+        &alpha, dual_vals, num_rows, &beta, primal_vals, num_rows, 
+        dual_vals, num_rows), "dual_vals <- 1.0 * dual_vals + 1.0 * primal_vals");
+
+      beta = -1.0;
+      check_cublas(cublasDgeam(handle, CUBLAS_OP_N, CUBLAS_OP_T, num_rows, rank, 
+        &alpha, dual_vals, num_rows, &beta, tilde_primal_vals, rank, 
+        dual_vals, num_rows), "dual_vals <- 1.0 * dual_vals - 1.0 * tilde H.T");
+
+      check_cublas(cublasDgeam(handle, CUBLAS_OP_N, CUBLAS_OP_N, num_rows, rank, 
+      &alpha, primal_vals, num_rows, &beta, prev_fac_vals, num_rows, 
+      prev_fac_vals, num_rows), "prev_fac_vals <- 1.0 * primal_vals - 1.0 * prev_fac_vals");
+
+      check_cublas(cublasDgeam(handle, CUBLAS_OP_N, CUBLAS_OP_T, rank, num_rows, 
+        &beta, tilde_primal_vals, rank, &alpha, primal_vals, num_rows, 
+        tilde_primal_vals, rank), "tilde_H <- -1.0 * tilde_primal_vals + 1.0 * primal_vals.T");
+#endif
 
       // compute the residuals..
       double * fnorm = admm_condition_vals + 4 * stream_id + 0;
@@ -102,7 +190,8 @@ void admm_gpu_kernel(
       double * fres = admm_condition_vals + 4 * stream_id + 2;
       double * dres = admm_condition_vals + 4 * stream_id + 3;
       
-      compute_diff_squared(stream, primal_vals, prev_fac_vals, tilde_primal_vals, num_rows * rank);
+      // prev_vals = fm_vals - prev_vals
+      // tilde_primal_vals = fm_vals - tilde_primal_vals
 
       check_cublas(cublasDnrm2(handle, num_rows * rank, primal_vals, 1, fnorm), "cublas Dnrm2 - fnorm");
       check_cublas(cublasDnrm2(handle, num_rows * rank, dual_vals, 1, dnorm), "cublas Dnrm2 - dnorm");
@@ -114,12 +203,16 @@ void admm_gpu_kernel(
 
       if (*dres < (tolerance * (*fnorm)) && *fres < (tolerance * (*dnorm))) {
         // printf("admm iteration terminated with iter: %d\n", i);
+        // force 10 iter
         stop_iter = true;
       }
     } // end of admm iteration
 
+#ifdef ENABLE_OF  
+#else
+    cudaFree(temp_fm_vals);
+#endif
     cublasDestroy(handle);
-    cusolverDnDestroy(cusolver);
 }
 
 void aoadmm_blocked_update(
@@ -152,6 +245,8 @@ void aoadmm_blocked_update(
   mat_cholesky_gpu(L); // L is factorized
 
   // Create explicit (L.T)^-1 * L^-1
+
+#ifdef ENABLE_PI  
   double * explicit_inverse;
   cudaMalloc(&explicit_inverse, sizeof(double) * n * n);
   cudaMemset(explicit_inverse, 0, n * n * sizeof(double));
@@ -162,7 +257,6 @@ void aoadmm_blocked_update(
 
   int *devInfo;
   cudaMalloc(&devInfo, sizeof(int));
-
   check_cusolver(
     cusolverDnDpotrs(cusolver, CUBLAS_FILL_MODE_LOWER, n, 
     n, L->vals, n, explicit_inverse, n, devInfo),
@@ -171,30 +265,34 @@ void aoadmm_blocked_update(
 
   cudaFree(devInfo); // assume nothing goes wrong
   cusolverDnDestroy(cusolver);
+
+  // pass in explicit inverse as gram_vals
+  double * gram_vals = explicit_inverse;
+#else
+  double * gram_vals = L->vals;
+#endif
   // Create cuda streams streams
 
   // Malloc pinned memory on host for streams
   // int block_size = 10000;
+  // printf("block size: %d\n", block_size);
   size_t _size = block_size * n * sizeof(double) * num_streams;
 
   double * prev_fac_vals; // also used to store diff vals
-  double * aux_fm_vals = aux_fm->vals; // dual variables U
   double * tilde_h_vals; // tilde_H
+
+  double * aux_fm_vals = aux_fm->vals; // dual variables U
   double * admm_condition_vals; // fres, dres, fnorm, dnorm
 
   // malloc on host
   check_cuda(cudaMallocHost(&admm_condition_vals, sizeof(double) * 4 * num_streams), "cudaMallocHost admm_condition_vals");
 
-  // pass in explicit inverse as gram_vals
-  double * gram_vals = explicit_inverse;
-  
   // stream 0 as default for now
   check_cuda(cudaMallocAsync(&prev_fac_vals, _size, 0), "cudaMallocAsync prev_fac_vals");
   check_cuda(cudaMallocAsync(&tilde_h_vals, _size, 0), "cudaMallocAsync tilde_h_vals");
 
   int rank = n;
   int stream_id = 0;
-
   for (int i = 0; i < m; i += block_size) {
 
     int end = i + block_size;
@@ -203,13 +301,12 @@ void aoadmm_blocked_update(
     }
     size_t offset = i * rank;
     size_t stream_offset = stream_id * block_size * rank;
-    double * primal_vals = fm->vals + offset;
   
     // Process rows from i to end-1
-    printf("Processing rows %d to %d stream_id: %d\n", i, end - 1, stream_id);
+    // printf("Processing rows %d to %d stream_id: %d\n", i, end - 1, stream_id);
     admm_gpu_kernel(
       gram_vals, rho, 
-      primal_vals,
+      fm->vals + offset, // primal vals
       o_mttkrp_gpu->vals + offset, 
       prev_fac_vals + stream_offset, // using gpu temp
       aux_fm_vals + offset, 
@@ -235,8 +332,7 @@ void aoadmm_blocked_update(
   cudaEventSynchronize(stop);
   cudaEventElapsedTime(&milliseconds, start, stop);
 
-  std::cout << "Inner Elapsed time for solving for blocked ADMM: " << milliseconds << " ms\n";
-
+  // std::cout << "Inner Elapsed time for solving for blocked ADMM: " << milliseconds << " ms\n";
 }
 
 

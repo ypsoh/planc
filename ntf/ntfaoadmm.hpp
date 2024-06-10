@@ -35,20 +35,28 @@ class NTFAOADMM : public AUNTF <T> {
     L = arma::chol(tempgram, "lower");
     Lt = L.t();
     bool stop_iter = false;
+    // printf("updated fac %f\n", arma::norm(updated_fac, "fro"));
+    // printf("norm L %f\n", arma::norm(L, "fro"));
 
     // Start ADMM loop from here
     for (int i = 0; i < admm_iter && !stop_iter; i++) {
       prev_fac = updated_fac;
       m_ncp_aux_t.set(mode, m_ncp_aux.factor(mode).t());
 
+      // MAT temp = this->ncp_mttkrp_t[mode] +
+      //                           (alpha * (updated_fac.t() +
+      //                                     m_ncp_aux_t.factor(mode)));
+
       m_temp_ncp_aux_t.set(
           mode, arma::solve(arma::trimatl(L),
                             this->ncp_mttkrp_t[mode] +
                                 (alpha * (updated_fac.t() +
                                           m_ncp_aux_t.factor(mode)))));
+
       m_ncp_aux_t.set(
           mode, arma::solve(arma::trimatu(Lt), m_temp_ncp_aux_t.factor(mode)));
 
+      // printf("norm first solve %f\n", arma::norm(m_ncp_aux_t.factor(mode), "fro"));
       // Update factor matrix
       updated_fac = m_ncp_aux_t.factor(mode).t();
       // Uncomment if numerical issues are seen
@@ -57,6 +65,7 @@ class NTFAOADMM : public AUNTF <T> {
       updated_fac.for_each(
           [](MAT::elem_type &val) { val = val > 0.0 ? val : 0.0; });
 
+      // INFO << arma::norm(updated_fac, "fro") << std::endl;
       // Update dual variable
       m_ncp_aux.set(mode, m_ncp_aux.factor(mode) + updated_fac -
                               m_ncp_aux_t.factor(mode).t());
@@ -72,8 +81,10 @@ class NTFAOADMM : public AUNTF <T> {
       double s = norm(updated_fac - prev_fac, "fro");
       if (r < (tolerance * facnorm) && s < (tolerance * dualnorm))
         stop_iter = true;
+        // printf("fnorm: %f dnorm: %f fres: %f dres: %f\n", facnorm, dualnorm, s, r);
     }
     m_ncp_aux.normalize(mode);
+    // exit(0);
     return updated_fac.t();
   }
 

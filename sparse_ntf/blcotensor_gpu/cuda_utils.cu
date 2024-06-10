@@ -353,17 +353,16 @@ __global__ void __apply_threshold(double* v, int n, const double th, const doubl
   }
 }
 
-__global__ void __apply_nonnegative_projection_kernel(double* v, double * diff, int n) {
+__global__ void __apply_nonnegative_projection_kernel(double* v, int n) {
   int idx = blockIdx.x * blockDim.x + threadIdx.x;
   if (idx < n) {
     double val = v[idx];
     v[idx] = (val >= 0) * val;
-    diff[idx] = (val < 0) * val;
   }
 }
 
-void apply_nonnegative_projection(double * v, double * diff, int n) {
-  __apply_nonnegative_projection_kernel<<<(n + BLOCK_SIZE - 1)/BLOCK_SIZE, BLOCK_SIZE, 0, 0>>>(v, diff, n);
+void apply_nonnegative_projection(double * v, int n) {
+  __apply_nonnegative_projection_kernel<<<(n + BLOCK_SIZE - 1)/BLOCK_SIZE, BLOCK_SIZE, 0, 0>>>(v, n);
 }
 
 MAT_GPU * init_mat_gpu(int m, int n) {

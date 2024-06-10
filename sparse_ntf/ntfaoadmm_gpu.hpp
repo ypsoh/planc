@@ -16,15 +16,27 @@ class NTFAOADMM_GPU : public AUNTF_GPU <T> {
 
   protected:
 
-    void update_gpu(const int mode, const MAT_GPU * gram, MAT_GPU ** factors, MAT_GPU * o_mttkrp) {
-
-      // aoadmm_update(factors[mode], aux_factors_gpu[mode], o_mttkrp, gram, admm_iter, tolerance);
-      
+    void update_gpu(const int mode, const MAT_GPU * gram, MAT_GPU * factors, MAT_GPU * o_mttkrp) {
       // calculate block size and num streams
-      int block_size = factors[mode]->n_rows; // default is num of cols for factor matrix
+      int block_size = factors->n_rows; // default is num of cols for factor matrix
       int num_streams = 1;
+
+      // int block_size = 1e3;
+      // int num_streams;
+
+      // if (factors[mode]->n_rows > block_size) {
+      //   num_streams = (factors[mode]->n_rows + block_size - 1) / block_size ;
+      // }
+      // else {
+      //   block_size = factors[mode]->n_rows;
+      //   num_streams = 1;
+      // };
+
+      // printf("num_streams: %d, block_size: %d\n", num_streams, block_size);
+      aoadmm_update(factors, aux_factors_gpu[mode], o_mttkrp, gram, 10, tolerance);
+
       // blocked and optimized admm update
-      aoadmm_blocked_update(factors[mode], aux_factors_gpu[mode], o_mttkrp, gram, block_size, admm_iter, tolerance, num_streams);
+      // aoadmm_blocked_update(factors, aux_factors_gpu[mode], o_mttkrp, gram, block_size, 10, tolerance, num_streams);
     }
   public:
     NTFAOADMM_GPU(const T &i_tensor, const int i_k, algotype i_algo)
@@ -38,7 +50,7 @@ class NTFAOADMM_GPU : public AUNTF_GPU <T> {
           printf("aux_factors_gpu[%d]: (%dx%d)\n", m, n_rows, n_cols);
           aux_factors_gpu[m] = init_mat_gpu(n_rows, n_cols);
         }
-        admm_iter = 5;
+        admm_iter = 10;
         tolerance = 0.01;
       }
 

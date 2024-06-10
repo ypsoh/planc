@@ -19,7 +19,7 @@ class NTFANLSBPP : public AUNTF<T>{
     UINT numChunks = nrhs / ONE_THREAD_MATRIX_SIZE;
     if (numChunks * ONE_THREAD_MATRIX_SIZE < nrhs) numChunks++;
 
-// #pragma omp parallel for schedule(dynamic)
+    #pragma omp parallel for schedule(dynamic)
     for (UINT i = 0; i < numChunks; i++) {
       UINT spanStart = i * ONE_THREAD_MATRIX_SIZE;
       UINT spanEnd = (i + 1) * ONE_THREAD_MATRIX_SIZE - 1;
