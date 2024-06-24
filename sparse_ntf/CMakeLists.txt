@@ -40,8 +40,7 @@ include_directories(
   ${Boost_INCLUDE_DIR}
   ${MKL_INCLUDE_DIR}
   ${OPENBLAS_INCLUDE_DIR}
-  # ${CUDA_INCLUDE_DIRS}
-  ${NTF_SOURCE_DIR}/blcotensor_gpu/include
+  ${CUDA_INCLUDE_DIRS} ${NTF_SOURCE_DIR}/blcotensor_gpu/include
 )
 
 set(CMAKE_CUDA_COMPILER ${CMAKE_CUDA_COMPILER})
@@ -55,11 +54,12 @@ blcotensor_gpu/aoadmm.cu
 blcotensor_gpu/anlsbpp.cu
 blcotensor_gpu/matrix_ops.cu
 blcotensor_gpu/vector_ops.cu
+blcotensor_gpu/cholesky_helpers.cu
+blcotensor_gpu/bpp.cu
 blcotensor_gpu/cublas_operations.cu
 ) 
 
-set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -std=c++17 -O3 -gencode=arch=compute_80,code=sm_80 --default-stream per-thread")
-message(STATUS "CMAKE_CUDA_FLAGS           = ${CMAKE_CUDA_FLAGS}"          )
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -std=c++17 -O3 -gencode=arch=compute_80,code=sm_80")
 
 add_executable(sparse_ntf
 sparse_ntf.cpp
@@ -72,6 +72,8 @@ set_target_properties(profiling PROPERTIES COMPILE_FLAGS "-fPIE" LINK_FLAGS "-fP
 
 
 add_library(blco_gpu ${CUDA_SOURCES})
+set_property(TARGET blco_gpu PROPERTY CUDA_ARCHITECTURES 72 80 90)
+#set_property(TARGET blco_gpu PROPERTY CUDA_ARCHITECTURES 72 80)
 
 # target_include_directories(sparse_ntf PRIVATE ${CUDA_INCLUDE_DIRS})
 
