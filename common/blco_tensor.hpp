@@ -68,7 +68,7 @@ namespace planc {
         // if you sum it all for all modes
         // it basically represents the total number of bits used to encode ALTO tensor
         for (int m = 0; m < this->m_modes; ++m) {
-          unsigned long long mask = lhalf(this->mode_masks[m]);
+          unsigned long long mask = lhalf(this->mode_masks_[m]);
           truncated_bitcounts[m] = popcount(mask);
         }
         
@@ -86,15 +86,15 @@ namespace planc {
         // Relinearize and copy into BLCO
         #pragma omp parallel for schedule(static)
         for (unsigned long long i = 0; i < this->m_numel; i++) {
-          LIT index = this->m_alto_indices[i];
+          LIT index = this->alto_indices_[i];
           unsigned long long blco_idx = 0;
           for (int n = 0; n < this->m_modes; ++n) {
             // recover original index, re encode to linearized format
-            unsigned long long mode_idx = (unsigned long long) pext(index, this->mode_masks[n]) & this->m_blco_mode_mask[n];
+            unsigned long long mode_idx = (unsigned long long) pext(index, this->mode_masks_[n]) & this->m_blco_mode_mask[n];
             blco_idx |= (mode_idx << this->m_blco_mode_pos[n]);
           }
           this->m_blco_indices[i] = blco_idx;
-          this->m_blco_values[i] = this->m_alto_data[i];
+          this->m_blco_values[i] = this->alto_data_[i];
         }
 
         wtime = omp_get_wtime() - wtime_s;
@@ -139,7 +139,7 @@ namespace planc {
           #pragma omp parallel for reduction(+:block_histogram[:block_count])
           for (unsigned long long i = 0; i < this->m_numel; i++) {
             // Get upper half of linearized index and use that as block_id
-            unsigned long long block_id = uhalf(this->m_alto_indices[i]); 
+            unsigned long long block_id = uhalf(this->alto_indices_[i]); 
             block_histogram[block_id] += 1;
           }
         } else {
@@ -186,7 +186,7 @@ namespace planc {
             for (int i = 0; i < this->m_modes; i++) {
               // YONGSEOK: note this->mode_masks is from ALTOTensor,, 
               // block_coords is required to reverse back to the original ALTO idnex
-              unsigned long long mode_mask = uhalf(this->mode_masks[i]);
+              unsigned long long mode_mask = uhalf(this->mode_masks_[i]);
               // from ALTO perspective, mode_idx will contain the bit mask information 
               // if block index is 101 
               // and mode_mask for uhalf for a mode is 011, 
@@ -242,14 +242,14 @@ namespace planc {
         // }
         // free ALTO related stuff
         //  -- not ideal and kind of hacky since we're using std::vectors
-        this->m_alto_data.clear(); // doesn't guarantee
-        this->m_alto_data.shrink_to_fit(); // C++11
-        this->m_alto_indices.clear();
-        this->m_alto_indices.shrink_to_fit();
-        this->m_partition_intervals.clear();
-        this->m_partition_intervals.shrink_to_fit();
-        this->m_partition_ptr.clear();
-        this->m_partition_ptr.shrink_to_fit();
+        this->alto_data_.clear(); // doesn't guarantee
+        this->alto_data_.shrink_to_fit(); // C++11
+        this->alto_indices_.clear();
+        this->alto_indices_.shrink_to_fit();
+        this->partition_intervals_.clear();
+        this->partition_intervals_.shrink_to_fit();
+        this->partition_ptr_.clear();
+        this->partition_ptr_.shrink_to_fit();
       }
 
       ~BLCOTensor() {
