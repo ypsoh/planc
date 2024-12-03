@@ -19,6 +19,7 @@
 #include <vector>
 #include <unordered_map>
 #include <cmath>
+#include <iterator>
 #include "common/utils.h"
 #include "common/ncpfactors.hpp"
 
@@ -54,77 +55,32 @@ class SparseTensor {
       
       std::cout << "Reading tensor from " << filename << std::endl;
       std::ifstream ifs(filename, std::ios_base::in);
-      std::string line;
-
-      int nmodes = 0;
-      std::string element;
-
-      // ifs.seekg(0); // go back to beginning of file to read non zeros
-
-      // first time reading tensor, traverse to end to 
-      // 1. count number of modes 2. count nnzs
-      UWORD _nnz = 0;
-      while (std::getline(ifs, line, '\n')) {
-        if (nmodes == 0) {
-          std::stringstream _line(line);
-          while(_line >> element) {
-            nmodes++;
-          }
-          nmodes--; // since the last element is the value not coordinate
-          this->m_modes = nmodes;
-        }
-        _nnz++;
-      }
-      m_numel = _nnz;
-      INFO << "num elements: " << m_numel << "\n";
-
-      // set vector size to predetermined size
-      this->m_indices.resize(this->m_modes);
-      for (int m = 0; m < this->m_modes; ++m) {
-        this->m_indices[m].resize(this->m_numel);
-      }
-      this->m_data.resize(this->m_numel);
-
-      // go back to beginning to parse idx and values
-      ifs.clear();
-      ifs.seekg(0);
-
-      unsigned long long nnz_idx = 0;
-
-      while (std::getline(ifs, line, '\n')) {
-        int mode_idx = 0;
-        char * ptr = &line[0];
-        for (int m = 0; m < this->m_modes; ++m) {
-          this->m_indices[m][nnz_idx] = (int) strtol(ptr, &ptr, 10);
-        }
-        this->m_data[nnz_idx] = (double) strtod(ptr, &ptr);
-        ++nnz_idx;
+      if (!ifs) {
+        throw std::runtime_error("Failed to open file: " + filename);
       }
 
-      // Map the 'raw' indices of the non zeros to a
-      // corresponding row in a factor matrix starting from 0
-      map_to_compact_indices(false);
-      
+      countModesAndNNZElements(ifs);
+      allocateMemory();
+      parseSparseTensor(ifs);
+
+      remapToCompactIndices(false); // don't to remap to compact indices but make tensor 0 offset
       // instantiate the omp_lock_ts
-      m_locks.resize(longest_mode());
-      for (auto lock : m_locks) {
-        omp_init_lock(&lock);
-      }
+      initializeLocks();
     }
 
-    ~SparseTensor() {}
-    /*
-    Used to map original indices to compact indices
-    (e.g. (34, 32, 53, 32) --> (0, 1, 2, 1))
-    */
-    void map_to_compact_indices(bool do_remap) {
+    ~SparseTensor() {
+      for (auto& lock : m_locks) {
+          omp_destroy_lock(&lock);
+      }
+    }
+    // Remapping is usually needed for real datasets where there is no guarantee 
+    // all indices will be occupied, the "remapping -- if(false)" is due to the 
+    // the 0 or 1 offset issue
+    void remapToCompactIndices(bool do_remap) {
       this->m_dimensions = UVEC(this->m_modes);
       this->m_compact_indices.resize(this->m_modes);
       this->m_mappings.resize(this->m_modes);
 
-      // Remapping is usually needed for real datasets where there is no guarantee 
-      // all indices will be occupied, the "remapping -- if(false)" is due to the 
-      // the 0 or 1 offset issue
       if (do_remap) {
         for (int m = 0; m < this->m_modes; ++m) {
           int new_index = 0;
@@ -152,10 +108,7 @@ class SparseTensor {
         }
       }
     }
-    // TODO: Will implement once basic Sparse TF is done
-    // or maybe just yield the mappings info as separate output for
-    // actually interpreting the factor matrices
-    void restore_index_mapping() {}
+
     int modes() const { return m_modes; }
     UWORD numel() const { return m_numel; }
     UVEC dimensions() const { return m_dimensions; }
@@ -287,6 +240,48 @@ class SparseTensor {
       printf("norm of first mttkrp output -- mode: %d: %f\n", i_n, arma::norm(*o_mttkrp, "fro"));
       // exit(0);
     }
+
+    private:
+      void countModesAndNNZElements(std::ifstream& ifs) {
+        std::string line;
+        if (std::getline(ifs, line)) {
+          std::istringstream iss(line);
+          m_modes = std::distance(std::istream_iterator<std::string>(iss), 
+                                  std::istream_iterator<std::string>()) - 1;
+        }
+        m_numel = std::count(std::istreambuf_iterator<char>(ifs), 
+                             std::istreambuf_iterator<char>(), '\n') + 1;
+        ifs.clear();
+        ifs.seekg(0);
+        INFO << "num elements: " << m_numel << "\n";
+        INFO << "num modes: " << m_modes << "\n";
+      }
+      
+      void allocateMemory() {
+        m_indices.resize(m_modes);
+        for (auto& mode_indices : m_indices) {
+            mode_indices.resize(m_numel);
+        }
+        m_data.resize(m_numel);
+      }
+
+      void parseSparseTensor(std::ifstream& ifs) {
+        std::string line;
+        for (size_t nnz_idx = 0; std::getline(ifs, line); ++nnz_idx) {
+            std::istringstream iss(line);
+            for (int m = 0; m < m_modes; ++m) {
+                iss >> m_indices[m][nnz_idx];
+            }
+            iss >> m_data[nnz_idx];
+        }
+      }
+
+      void initializeLocks() {
+          m_locks.resize(longest_mode());
+          for (auto& lock : m_locks) {
+              omp_init_lock(&lock);
+          }
+      }
 };
 }
 
