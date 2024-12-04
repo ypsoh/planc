@@ -239,7 +239,6 @@ void aoadmm_blocked_update(
 
 }
 
-
 void aoadmm_update(
   MAT_GPU * fm, MAT_GPU * aux_fm, MAT_GPU * o_mttkrp_gpu, 
   const MAT_GPU * gram, int admm_iter, double tolerance) {
@@ -270,15 +269,10 @@ void aoadmm_update(
   // For gpu kernel calls
   int num_tblocks = (m * n + BLOCK_SIZE - 1) / BLOCK_SIZE;
   int fm_size = m * n;
-  int gram_size = n * n;
 
   //--- DEBUG compute norms and stuff delete later
   cublasHandle_t handle;
   check_cublas(cublasCreate(&handle), "create cublas handle");
-
-  double debug;
-
-  // cudaFree(debug);
 
   double alpha, beta;
   for (int i = 0; i < admm_iter && !stop_iter; ++i) {
@@ -295,19 +289,12 @@ void aoadmm_update(
       &alpha, o_mttkrp_gpu->vals, m, &beta, temp_fm->vals, m, 
       temp_fm->vals, m), "temp_fm <- 1.0 * mttkrp + alpha * temp_fm");
 
-    // cudaMemcpy(dd, aux_fm_t->vals, sizeof(double) * 16, cudaMemcpyDeviceToHost);
-    // for (int nn = 0; nn < 16; ++nn) printf("%f\n", dd[nn]);
-    // exit(0);
     beta = 0.0;
     check_cublas(cublasDgeam(handle, CUBLAS_OP_T, CUBLAS_OP_N, n, m, 
       &alpha, temp_fm->vals, m, &beta, aux_fm_t->vals, n, 
       aux_fm_t->vals, n), "aux_fm_t <- 1.0 * aux_fm.T");
 
     mat_cholesky_solve_gpu(L, aux_fm_t, true);
-
-    // check_cublas(cublasDgeam(handle, CUBLAS_OP_T, CUBLAS_OP_N, m, n, 
-    //   &alpha, aux_fm_t->vals, n, &beta, aux_fm->vals, m, 
-    //   aux_fm->vals, m), "aux_fm <- 1.0 * aux_fm_t.T");
 
     cudaDeviceSynchronize();
 
@@ -328,9 +315,6 @@ void aoadmm_update(
     check_cublas(cublasDgeam(handle, CUBLAS_OP_N, CUBLAS_OP_T, m, n, 
       &alpha, aux_fm->vals, m, &beta, aux_fm_t->vals, n, 
       aux_fm->vals, m), "aux_fm <- 1.0 * aux_fm - 1.0 * aux_fm_t.T");
-
-    // check_cublas(cublasDnrm2(handle, fm_size, update_fm->vals, 1, &debug), "cublas Dnrm2");
-    // printf("after th %f\n", debug);
 
     // aux_fm = aux_fm + updated_fac - aux_fm_t
 

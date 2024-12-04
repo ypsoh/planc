@@ -177,7 +177,13 @@ class AUNTF {
         int last_mode = this->m_input_tensor.modes() - 1;
         m_input_tensor.mttkrp(last_mode, m_ncp_factors.factors(), &ncp_mttkrp_t[last_mode]);
 
-        double temp_err = m_input_tensor.err(m_ncp_factors, ncp_mttkrp_t[last_mode], last_mode);
+        // ALTO mttkrp (gpu_offload=0) still operates over R x I mttkrp output
+        // So use the mttkrp.t() for correct error calculation. 
+        double temp_err = m_input_tensor.err(m_ncp_factors, ncp_mttkrp_t[last_mode].t(), last_mode);
+
+        // Partial GPU (only BLCO mttkrp, gpu_offload=1) operates over I x R, so use mttkrp (without transpose) for correct error calculation
+        // double temp_err = m_input_tensor.err(m_ncp_factors, ncp_mttkrp_t[last_mode], last_mode);
+
         this->m_rel_error = temp_err;
         INFO << "relative_error @it " << this->m_current_it
             << "=" << temp_err << std::endl;

@@ -2,18 +2,9 @@
 
 void hals_update(MAT_GPU * fm, MAT_GPU * o_mttkrp_gpu, const MAT_GPU * gram) {
   _FType *fm_times_gram_col;
-  _FType *mttkrp_t; // temp for transpose mttkrp
 
   int m = fm->n_rows;
   int n = fm->n_cols;
-
-  // double * _check;
-  // _check = (double *) malloc(sizeof(double) * n * n);
-  // cudaMemcpy(_check, gram->vals, sizeof(double) * n * n, cudaMemcpyDeviceToHost);
-  // for (int e = 0; e < n * n; ++e) {
-  //   printf("%f ", _check[e]);
-  //   if ((e+1)%n == 0) printf("\n");
-  // }
 
   check_cuda(
     cudaMalloc((void**)&fm_times_gram_col, m * sizeof(_FType)), "cudaMalloc fm_times_gram_col"
@@ -36,5 +27,4 @@ void hals_update(MAT_GPU * fm, MAT_GPU * o_mttkrp_gpu, const MAT_GPU * gram) {
   }
 
   cudaFree(fm_times_gram_col);
-  cudaFree(mttkrp_t);
 }

@@ -6,6 +6,9 @@ Sample test cases executed and verified for output. The output of each of the co
 * `--gpu_offload {0,2}` where {0,2} is for {ALTO,BLCO}-based constrained STF
   * ALTO-based: ALTO Tensor + Constrained update via NVBLAS offload
   * BLCO-based: BLCO Tensor + Constrained update via custom CUDA kernels (end-to-end fully offloaded)
+### Supported Constrained Updates
+* --algo {0,1,4} -- {MU, HALS, ADMM}
+* --algo {2} -- {BPP} -- in developement
 ### Example command
 * `./sparse_ntf -i ~/hpctensor/data/uber.tns -k 64 -t 20 -e 1 -a 0 --gpu_offload 0 | grep relative_error`
 =========================

@@ -493,7 +493,7 @@ class ParseCommandLine {
             << "-k 64 -t 30 -e 1 -a 5 --dimtree 1" << std::endl;
         // Shared memory sparse_ntf case
         INFO << "Usage 7: ./sparse_ntf -i <filename> "
-            << "-k 64 -t 30 -e 1 -a 0" << std::endl;
+            << "-k 64 -t 30 -e 1 --gpu_offload 2 -a 0" << std::endl;
         // Mention all the options
         INFO << std::endl;
         INFO << "\tThe following command line options are available:" << std::endl;
