@@ -7,7 +7,6 @@ set(ARMA_USE_WRAPPER true)
 # the settings below will be automatically configured by the rest of this script
 
 project(NTF CXX)
-set(CMAKE_CXX_STANDARD 17)
 set(NTFLIB_COMMON ${NTF_SOURCE_DIR}/../common)
 set(NNLS_SRC ${NTF_SOURCE_DIR}/../nnls/)
 message(STATUS "NTF_SOURCE_DIR =  ${NTF_SOURCE_DIR}")
